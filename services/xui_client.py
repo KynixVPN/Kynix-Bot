@@ -223,5 +223,3 @@ async def delete_xui_client(email: str, inbound_id: int | None = None):
             client_uuid,
             inbound_id,
         )
-d,
-        )
