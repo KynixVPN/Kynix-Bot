@@ -247,6 +247,132 @@ async def cmd_inf(message: Message):
     )
 
 
+async def _try_delete_xui_for_fake_id(fake_id: int) -> tuple[bool, str | None]:
+    """Best-effort delete X-UI client for a given fake_id.
+
+    Chooses inbound based on the user's current subscription type when possible.
+
+    Returns:
+        (deleted: bool, error: str | None)
+    """
+    sub = None
+    try:
+        user = await get_user_by_fakeid(fake_id)
+        if user:
+            sub = await get_user_last_subscription(user.id)
+    except Exception:
+        sub = None
+
+    if sub and sub.active:
+        inbound_candidates = [
+            int(settings.XUI_INBOUND_ID_INF) if sub.expires_at is None else int(settings.XUI_INBOUND_ID)
+        ]
+    else:
+        inbound_candidates = [int(settings.XUI_INBOUND_ID), int(settings.XUI_INBOUND_ID_INF)]
+
+    last_err: str | None = None
+    for inbound_id in inbound_candidates:
+        try:
+            await delete_xui_client(email=str(fake_id), inbound_id=inbound_id)
+            return True, None
+        except Exception as e:
+            last_err = str(e)
+
+    return False, last_err
+
+
+@router.message(F.text.startswith("/del"))
+async def cmd_del(message: Message):
+    """Admin-only: delete subscription and X-UI client by fake_id."""
+    if message.from_user.id not in ADMINS:
+        return await message.answer("❌ У вас нет прав.")
+
+    parts = (message.text or "").split()
+    if len(parts) != 2:
+        return await message.answer("Использование: /del FAKE_ID")
+
+    try:
+        fake_id = int(parts[1])
+    except ValueError:
+        return await message.answer("❌ FAKE_ID должен быть числом.")
+
+    user = await get_user_by_fakeid(fake_id)
+    if not user:
+        return await message.answer("❌ Пользователь не найден.")
+
+    deleted, err = await _try_delete_xui_for_fake_id(fake_id)
+    await deactivate_user_subscriptions(user.id)
+
+    if deleted:
+        return await message.answer("✅ Подписка удалена: конфиг удалён, подписка деактивирована.")
+
+    return await message.answer(
+        "⚠️ Подписка деактивирована, но не удалось удалить конфиг в X-UI:\n"
+        f"<code>{err or 'Неизвестная ошибка'}</code>"
+    )
+
+
+@router.message(F.text.startswith("/month"))
+async def cmd_month(message: Message):
+    """Admin-only: grant 1 month Plus subscription by fake_id."""
+    if message.from_user.id not in ADMINS:
+        return await message.answer("❌ У вас нет прав.")
+
+    parts = (message.text or "").split()
+    if len(parts) != 2:
+        return await message.answer("Использование: /month FAKE_ID")
+
+    try:
+        fake_id = int(parts[1])
+    except ValueError:
+        return await message.answer("❌ FAKE_ID должен быть числом.")
+
+    user = await get_user_by_fakeid(fake_id)
+    if not user:
+        return await message.answer("❌ Пользователь не найден.")
+
+    # cleanup old X-UI config (if any) and deactivate existing subs
+    await _try_delete_xui_for_fake_id(fake_id)
+    await deactivate_user_subscriptions(user.id)
+
+    sub = await create_subscription(user.id, days=30)
+
+    return await message.answer(
+        "📅 Выдана подписка на <b>1 месяц</b>!\n\n"
+        f"<code>{sub.xui_config}</code>"
+    )
+
+
+@router.message(F.text.startswith("/year"))
+async def cmd_year(message: Message):
+    """Admin-only: grant 1 year Plus subscription by fake_id."""
+    if message.from_user.id not in ADMINS:
+        return await message.answer("❌ У вас нет прав.")
+
+    parts = (message.text or "").split()
+    if len(parts) != 2:
+        return await message.answer("Использование: /year FAKE_ID")
+
+    try:
+        fake_id = int(parts[1])
+    except ValueError:
+        return await message.answer("❌ FAKE_ID должен быть числом.")
+
+    user = await get_user_by_fakeid(fake_id)
+    if not user:
+        return await message.answer("❌ Пользователь не найден.")
+
+    # cleanup old X-UI config (if any) and deactivate existing subs
+    await _try_delete_xui_for_fake_id(fake_id)
+    await deactivate_user_subscriptions(user.id)
+
+    sub = await create_subscription(user.id, days=365)
+
+    return await message.answer(
+        "📅 Выдана подписка на <b>1 год</b>!\n\n"
+        f"<code>{sub.xui_config}</code>"
+    )
+
 
 @router.message(F.text.startswith("/refresh"))
 async def cmd_refresh(message: Message):
