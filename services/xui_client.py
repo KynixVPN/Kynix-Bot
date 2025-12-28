@@ -3,6 +3,10 @@ import httpx
 import uuid
 import time
 import json
+import asyncio
+import ssl
+import hashlib
+from urllib.parse import urlparse
 from config import settings
 
 logger = logging.getLogger("xui_client")
@@ -11,6 +15,85 @@ logger = logging.getLogger("xui_client")
 class XuiError(Exception):
     pass
 
+
+
+
+def _get_httpx_tls_kwargs() -> dict:
+    """Build kwargs for httpx client with TLS settings from .env."""
+    kwargs: dict = {}
+    # CA pinning: if XUI_TLS_CA_CERT is set, httpx trusts only that CA bundle
+    if getattr(settings, "XUI_TLS_CA_CERT", None):
+        kwargs["verify"] = settings.XUI_TLS_CA_CERT
+    # mTLS (client certificate)
+    cert_path = getattr(settings, "XUI_TLS_CLIENT_CERT", None)
+    key_path = getattr(settings, "XUI_TLS_CLIENT_KEY", None)
+    if cert_path and key_path:
+        kwargs["cert"] = (cert_path, key_path)
+    elif cert_path and not key_path:
+        # allow single file containing both cert+key
+        kwargs["cert"] = cert_path
+    return kwargs
+
+
+async def _check_xui_cert_fingerprint() -> None:
+    """Optional strict certificate fingerprint pinning (sha256 of DER cert)."""
+    expected = getattr(settings, "XUI_TLS_FINGERPRINT_SHA256", None)
+    if not expected:
+        return
+
+    base_url = settings.XUI_BASE_URL
+    u = urlparse(base_url)
+    if u.scheme != "https":
+        raise XuiError("XUI_TLS_FINGERPRINT_SHA256 requires https:// XUI_BASE_URL")
+    host = u.hostname
+    if not host:
+        raise XuiError("Failed to parse host from XUI_BASE_URL for fingerprint pinning")
+    port = u.port or 443
+
+    cafile = getattr(settings, "XUI_TLS_CA_CERT", None)
+    ctx = ssl.create_default_context(cafile=cafile if cafile else None)
+    # ensure hostname verification
+    ctx.check_hostname = True
+    ctx.verify_mode = ssl.CERT_REQUIRED
+
+    reader = writer = None
+    try:
+        reader, writer = await asyncio.open_connection(
+            host,
+            port,
+            ssl=ctx,
+            server_hostname=host,
+        )
+        ssl_obj = writer.get_extra_info("ssl_object")
+        if ssl_obj is None:
+            raise XuiError("TLS handshake failed: no ssl_object")
+        cert_bin = ssl_obj.getpeercert(binary_form=True)
+        if not cert_bin:
+            raise XuiError("TLS handshake failed: empty peer cert")
+        actual = hashlib.sha256(cert_bin).hexdigest().lower()
+
+        if actual != expected:
+            raise XuiError(
+                "XUI TLS certificate fingerprint mismatch. "
+                f"expected={expected} actual={actual} host={host}:{port}"
+            )
+    finally:
+        try:
+            if writer is not None:
+                writer.close()
+                await writer.wait_closed()
+        except Exception:
+            pass
+
+
+def _build_xui_http_client() -> httpx.AsyncClient:
+    tls_kwargs = _get_httpx_tls_kwargs()
+    return httpx.AsyncClient(
+        base_url=settings.XUI_BASE_URL,
+        timeout=10.0,
+        follow_redirects=True,
+        **tls_kwargs,
+    )
 
 # ============================
 # LOGIN
@@ -82,7 +165,9 @@ def build_vless(uid, host, port, tag, fake_id, pbk, sid):
 # ============================
 
 async def create_xui_client(fake_id: int, expiry_ts: int, tag: str, inbound_id: int):
-    async with httpx.AsyncClient(base_url=settings.XUI_BASE_URL, verify=False) as client:
+    await _check_xui_cert_fingerprint()
+
+    async with _build_xui_http_client() as client:
 
         # login
         await xui_login(client)
@@ -186,7 +271,9 @@ async def create_client_inf(fake_id: int):
 async def delete_xui_client(email: str, inbound_id: int | None = None):
     inbound_id = inbound_id or int(settings.XUI_INBOUND_ID)
 
-    async with httpx.AsyncClient(base_url=settings.XUI_BASE_URL, verify=False) as client:
+    await _check_xui_cert_fingerprint()
+
+    async with _build_xui_http_client() as client:
         await xui_login(client)
         inbound = await get_inbound(client, inbound_id)
 

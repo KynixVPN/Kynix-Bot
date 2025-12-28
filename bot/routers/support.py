@@ -1,4 +1,5 @@
 from datetime import datetime
+import html
 
 from aiogram import Router, F
 from aiogram.filters import Command
@@ -313,7 +314,8 @@ async def support_messages(message: Message):
         for admin_id in settings.ADMINS:
             try:
                 if message.content_type == "text" and message.text:
-                    await message.bot.send_message(admin_id, f"{header_admin}\n\n{message.text}")
+                    safe_text = html.escape(message.text)
+                    await message.bot.send_message(admin_id, f"{header_admin}\n\n<pre>{safe_text}</pre>")
                 else:
                     header = await message.bot.send_message(admin_id, header_admin)
                     await _safe_copy(
@@ -382,7 +384,8 @@ async def support_messages(message: Message):
         for admin_id in settings.ADMINS:
             try:
                 if message.content_type == "text" and message.text:
-                    await message.bot.send_message(admin_id, f"{header_admin}\n\n{message.text}")
+                    safe_text = html.escape(message.text)
+                    await message.bot.send_message(admin_id, f"{header_admin}\n\n<pre>{safe_text}</pre>")
                 else:
                     # для вложений: заголовок + копия вложения reply'ем
                     header_text = f"{header_admin}\n\n{user_payload}" if user_payload else header_admin
