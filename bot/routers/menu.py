@@ -35,7 +35,6 @@ router = Router(name="menu")
 def main_menu_kb():
     return InlineKeyboardMarkup(inline_keyboard=[
         [InlineKeyboardButton(text="Plus", callback_data="menu_plus")],
-        [InlineKeyboardButton(text="Proxy", callback_data="menu_proxy")],
         [InlineKeyboardButton(text="Профиль", callback_data="menu_profile")],
         [InlineKeyboardButton(text="Support", callback_data="menu_support")],
     ])
@@ -53,18 +52,6 @@ def profile_menu_kb():
         [InlineKeyboardButton(text="🏠 Главное меню", callback_data="menu_home")],
     ])
 
-
-def proxy_menu_kb():
-    return InlineKeyboardMarkup(inline_keyboard=[
-        [InlineKeyboardButton(
-            text="🔗 Подключиться",
-            url=(
-                "https://t.me/socks?"
-                "server=37.114.37.147&port=33475&user=KynixVPN&pass=KynixVPNfreesocks5"
-            )
-        )],
-        [InlineKeyboardButton(text="⬅️ Назад", callback_data="menu_home")],
-    ])
 
 
 def support_menu_kb():
@@ -173,21 +160,6 @@ async def menu_plus(call: CallbackQuery):
     await call.message.delete()
 
 
-@router.callback_query(F.data == "menu_proxy")
-async def menu_proxy(call: CallbackQuery):
-    await call.answer()
-
-    photo = FSInputFile("images/proxy.jpg")
-
-    text = (
-        "<b>Бесплатный Telegram прокси от Kynix VPN</b>\n\n"
-        "Только для Telegram, сайты через него не откроются.\n\n"
-        "Мы не собираем ваши данные.\n\n"
-        "Нажмите кнопку ниже 👇"
-    )
-
-    await call.message.answer_photo(photo, caption=text, reply_markup=proxy_menu_kb())
-    await call.message.delete()
 
 
 @router.callback_query(F.data == "menu_buy_plus")
