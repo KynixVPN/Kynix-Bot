@@ -32,6 +32,20 @@ from security.memory_store import remember_support_user, refresh_can_run, refres
 router = Router(name="menu")
 
 
+async def safe_delete_message(message: Message | None) -> None:
+    if message is None:
+        return
+    try:
+        await message.delete()
+    except TelegramForbiddenError:
+        return
+    except TelegramBadRequest as e:
+        err = str(e)
+        if "message to delete not found" in err or "message can't be deleted" in err:
+            return
+        raise
+
+
 def main_menu_kb():
     return InlineKeyboardMarkup(inline_keyboard=[
         [InlineKeyboardButton(text="Plus", callback_data="menu_plus")],
@@ -157,7 +171,7 @@ async def menu_plus(call: CallbackQuery):
     )
 
     await call.message.answer_photo(photo, caption=text, reply_markup=plus_menu_kb())
-    await call.message.delete()
+    await safe_delete_message(call.message)
 
 
 
@@ -221,7 +235,7 @@ async def menu_profile(call: CallbackQuery):
     )
 
     await call.message.answer_photo(photo, caption=text, reply_markup=profile_menu_kb())
-    await call.message.delete()
+    await safe_delete_message(call.message)
 
 
 @router.message(F.text.startswith("/inf"))
@@ -509,9 +523,4 @@ async def menu_home(call: CallbackQuery):
 
     await call.message.answer_photo(photo, caption=text, reply_markup=main_menu_kb())
 
-    # Telegram может не позволить удалить сообщение (например, если оно не от бота,
-    # слишком старое, или у бота нет прав в чате). Чтобы не падал обработчик — игнорируем.
-    try:
-        await call.message.delete()
-    except (TelegramBadRequest, TelegramForbiddenError):
-        pass
+    await safe_delete_message(call.message)
