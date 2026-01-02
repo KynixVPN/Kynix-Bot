@@ -26,7 +26,7 @@ class Subscription(Base):
     user_id: Mapped[int] = mapped_column(ForeignKey("users.id"))
     active: Mapped[bool] = mapped_column(Boolean, default=True)
     expires_at: Mapped[Optional[datetime]] = mapped_column(DateTime, nullable=True, default=None)
-xui_client_id: Mapped[Optional[str]] = mapped_column(String(255), nullable=True)
+    xui_client_id: Mapped[Optional[str]] = mapped_column(String(255), nullable=True)
     xui_email: Mapped[Optional[str]] = mapped_column(String(255), nullable=True)
     xui_config: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
 
