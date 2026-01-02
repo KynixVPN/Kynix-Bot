@@ -1,4 +1,4 @@
-from datetime import datetime, timedelta
+from datetime import datetime
 from typing import Optional
 
 from sqlalchemy import BigInteger, String, Integer, DateTime, Boolean, ForeignKey, Text
@@ -25,11 +25,8 @@ class Subscription(Base):
     id: Mapped[int] = mapped_column(primary_key=True, autoincrement=True)
     user_id: Mapped[int] = mapped_column(ForeignKey("users.id"))
     active: Mapped[bool] = mapped_column(Boolean, default=True)
-    expires_at: Mapped[datetime] = mapped_column(
-        default=lambda: datetime.utcnow() + timedelta(days=31)
-    )
-
-    xui_client_id: Mapped[Optional[str]] = mapped_column(String(255), nullable=True)
+    expires_at: Mapped[Optional[datetime]] = mapped_column(DateTime, nullable=True, default=None)
+xui_client_id: Mapped[Optional[str]] = mapped_column(String(255), nullable=True)
     xui_email: Mapped[Optional[str]] = mapped_column(String(255), nullable=True)
     xui_config: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
 
