@@ -17,6 +17,7 @@ from db.repo_subs import (
     create_subscription_inf,
     create_subscription,
     deactivate_user_subscriptions,
+    upsert_plus_subscription_until,
 )
 
 from services.payments import TARIFFS, build_prices, handle_successful_payment
@@ -385,6 +386,68 @@ async def cmd_year(message: Message):
     return await message.answer(
         "📅 Выдана подписка на <b>1 год</b>!\n\n"
         f"<code>{sub.xui_config}</code>"
+    )
+
+
+@router.message(F.text.startswith("/subs"))
+async def cmd_subs_until(message: Message):
+    """Admin-only: grant/extend Plus subscription until a specific date.
+
+    Usage: /subs FAKE_ID DD.MM.YYYY
+
+    - If the user has an active Plus subscription, it will be extended to the given date
+      (never shortened).
+    - If the user has no active subscription or has Infinite, a new Plus subscription is created.
+    """
+    if message.from_user.id not in ADMINS:
+        return await message.answer("❌ У вас нет прав.")
+
+    parts = (message.text or "").split()
+    if len(parts) != 3:
+        return await message.answer(
+            "Использование: <code>/subs FAKE_ID ДД.ММ.ГГГГ</code>\n"
+            "Пример: <code>/subs 123456 31.12.2026</code>"
+        )
+
+    try:
+        fake_id = int(parts[1])
+    except ValueError:
+        return await message.answer("❌ FAKE_ID должен быть числом.")
+
+    date_str = parts[2].strip()
+    from datetime import datetime
+
+    try:
+        d = datetime.strptime(date_str, "%d.%m.%Y")
+    except ValueError:
+        return await message.answer(
+            "❌ Неверный формат даты. Используйте <code>ДД.ММ.ГГГГ</code>, например <code>01.01.2026</code>."
+        )
+
+    # "до даты" — считаем включительно до конца дня (UTC)
+    expires_at = d.replace(hour=23, minute=59, second=59, microsecond=0)
+
+    user = await get_user_by_fakeid(fake_id)
+    if not user:
+        return await message.answer("❌ Пользователь не найден.")
+
+    # если уже активна Plus и дата не меньше текущей — ничего не делаем
+    active_sub = await get_user_active_subscription(user.id)
+    if active_sub and active_sub.expires_at is not None and active_sub.active:
+        if active_sub.expires_at >= expires_at:
+            return await message.answer(
+                "✅ У пользователя уже есть подписка Plus, срок которой не меньше указанного.\n"
+                f"Текущий срок: <b>{active_sub.expires_at.strftime('%Y-%m-%d %H:%M')}</b>"
+            )
+
+    # cleanup old X-UI config (if any) — inbound выбирается по текущему типу
+    await _try_delete_xui_for_fake_id(fake_id)
+
+    sub = await upsert_plus_subscription_until(user.id, fake_id=fake_id, expires_at=expires_at)
+
+    return await message.answer(
+        "📅 Подписка Plus выдана/продлена до <b>{}</b>!\n\n"
+        "<code>{}</code>".format(sub.expires_at.strftime("%Y-%m-%d %H:%M"), sub.xui_config)
     )
 
 

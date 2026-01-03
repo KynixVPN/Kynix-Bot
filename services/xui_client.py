@@ -6,6 +6,7 @@ import json
 import asyncio
 import ssl
 import hashlib
+from datetime import datetime, timezone
 from urllib.parse import urlparse
 from config import settings
 
@@ -241,6 +242,30 @@ async def create_client_for_user(fake_id: int, days: int):
     expiry_ts = int(time.time() * 1000 + days * 86400 * 1000)
     inbound_plus = int(settings.XUI_INBOUND_ID)
 
+    return await create_xui_client(
+        fake_id=fake_id,
+        expiry_ts=expiry_ts,
+        tag="Plus",
+        inbound_id=inbound_plus,
+    )
+
+
+# ============================
+# CREATE PLUS UNTIL EXACT DATETIME (UTC)
+# ============================
+
+async def create_client_for_user_until(fake_id: int, expires_at: datetime):
+    """Создаёт Plus клиента в X-UI до конкретной даты/времени.
+
+    В БД в проекте используются naive datetime в UTC (через datetime.utcnow()),
+    поэтому здесь считаем, что expires_at тоже в UTC.
+    """
+    # Convert to epoch milliseconds; treat naive datetime as UTC
+    if expires_at.tzinfo is None:
+        expires_at = expires_at.replace(tzinfo=timezone.utc)
+    expiry_ts = int(expires_at.timestamp() * 1000)
+
+    inbound_plus = int(settings.XUI_INBOUND_ID)
     return await create_xui_client(
         fake_id=fake_id,
         expiry_ts=expiry_ts,
