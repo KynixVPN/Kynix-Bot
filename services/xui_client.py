@@ -335,3 +335,72 @@ async def delete_xui_client(email: str, inbound_id: int | None = None):
             client_uuid,
             inbound_id,
         )
+
+
+# ============================
+# UPDATE CLIENT EXPIRY (KEEP UUID)
+# ============================
+
+async def update_xui_client_expiry(email: str, inbound_id: int, expiry_ts: int) -> dict:
+    """Продлевает срок существующего клиента в X-UI, не меняя UUID/ссылку.
+
+    Находит клиента по email (у нас это fake_id в строке) в указанном inbound и
+    обновляет поле expiryTime.
+
+    Возвращает найденного/обновлённого клиента (dict) из inbound.settings.
+    """
+    await _check_xui_cert_fingerprint()
+
+    async with _build_xui_http_client() as client:
+        await xui_login(client)
+        inbound = await get_inbound(client, inbound_id)
+
+        settings_obj = json.loads(inbound["settings"])
+        clients = settings_obj.get("clients", [])
+
+        idx = next(
+            (i for i, c in enumerate(clients) if str(c.get("email")) == str(email)),
+            None,
+        )
+        if idx is None:
+            raise XuiError(f"Client {email} not found in inbound {inbound_id}")
+
+        # mutate expiry in-place
+        clients[idx]["expiryTime"] = int(expiry_ts)
+
+        payload = {
+            "id": inbound_id,
+            "settings": json.dumps({"clients": clients}, ensure_ascii=False),
+        }
+
+        # Different X-UI / 3x-ui versions expose different endpoints.
+        # Try common variants.
+        last_err: str | None = None
+        for url in (
+            "/panel/api/inbounds/updateClient",
+            f"/panel/api/inbounds/{inbound_id}/updateClient",
+        ):
+            try:
+                resp = await client.post(url, json=payload)
+                if resp.status_code != 200:
+                    last_err = f"{url} -> {resp.status_code}: {resp.text}"
+                    continue
+                try:
+                    j = resp.json()
+                    if isinstance(j, dict) and not j.get("success", True):
+                        last_err = f"{url} rejected: {resp.text}"
+                        continue
+                except Exception:
+                    pass
+
+                logger.info(
+                    "Updated X-UI client expiry email=%s inbound=%s expiry_ts=%s",
+                    email,
+                    inbound_id,
+                    expiry_ts,
+                )
+                return clients[idx]
+            except Exception as e:
+                last_err = f"{url} exception: {e}"
+
+        raise XuiError(last_err or "Failed to updateClient")

@@ -1,10 +1,18 @@
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 import math
 
 from sqlalchemy import select, update
 from db.base import async_session
 from db.models import Subscription, User
-from services.xui_client import create_client_inf, create_client_for_user, create_client_for_user_until
+from config import settings
+
+from services.xui_client import (
+    create_client_inf,
+    create_client_for_user,
+    create_client_for_user_until,
+    delete_xui_client,
+    update_xui_client_expiry,
+)
 
 
 # ============================
@@ -170,50 +178,64 @@ async def upsert_plus_subscription_until(user_id: int, fake_id: int, expires_at:
     Важно: удаление старого клиента X-UI делается на уровне обработчика команды (router),
     чтобы можно было выбрать inbound по типу текущей подписки.
     """
-    xui = await create_client_for_user_until(fake_id=fake_id, expires_at=expires_at)
-
     async with async_session() as session:
-        # текущая активная подписка (если есть)
-        q = (
+        # Берём самую свежую Plus-подписку (активную или нет), чтобы при наличии
+        # конфига продлевать его, а не пересоздавать.
+        q_plus = (
             select(Subscription)
-            .where(Subscription.user_id == user_id, Subscription.active.is_(True))
+            .where(Subscription.user_id == user_id, Subscription.expires_at.is_not(None))
             .order_by(Subscription.id.desc())
             .limit(1)
         )
-        res = await session.execute(q)
-        active_sub = res.scalar_one_or_none()
+        res_plus = await session.execute(q_plus)
+        last_plus = res_plus.scalar_one_or_none()
 
-        if active_sub and active_sub.expires_at is not None:
-            # продляем существующую Plus
-            await session.execute(
-                update(Subscription)
-                .where(Subscription.user_id == user_id, Subscription.id != active_sub.id)
-                .values(active=False)
-            )
-            await session.execute(
-                update(Subscription)
-                .where(Subscription.id == active_sub.id)
-                .values(
-                    active=True,
-                    expires_at=expires_at,
-                    xui_client_id=xui["uuid"],
-                    xui_email=xui["email"],
-                    xui_config=xui["vless"],
-                    created_at=datetime.utcnow(),
+        if last_plus and last_plus.xui_email:
+            # Пытаемся продлить существующий X-UI клиент (uuid/ссылка остаются прежними)
+            # expires_at в проекте хранится как naive UTC.
+            ts = expires_at
+            if ts.tzinfo is None:
+                # treat naive as UTC
+                expiry_ts = int(ts.replace(tzinfo=timezone.utc).timestamp() * 1000)
+            else:
+                expiry_ts = int(ts.timestamp() * 1000)
+
+            try:
+                await update_xui_client_expiry(
+                    email=str(last_plus.xui_email),
+                    inbound_id=int(settings.XUI_INBOUND_ID),
+                    expiry_ts=expiry_ts,
                 )
-            )
-            await session.commit()
 
-            # обновим объект в памяти
-            active_sub.active = True
-            active_sub.expires_at = expires_at
-            active_sub.xui_client_id = xui["uuid"]
-            active_sub.xui_email = xui["email"]
-            active_sub.xui_config = xui["vless"]
-            active_sub.created_at = datetime.utcnow()
-            return active_sub
+                # Деактивируем все остальные и активируем/обновляем найденную Plus
+                await session.execute(
+                    update(Subscription)
+                    .where(Subscription.user_id == user_id, Subscription.id != last_plus.id)
+                    .values(active=False)
+                )
+                await session.execute(
+                    update(Subscription)
+                    .where(Subscription.id == last_plus.id)
+                    .values(
+                        active=True,
+                        expires_at=expires_at,
+                    )
+                )
+                await session.commit()
+
+                last_plus.active = True
+                last_plus.expires_at = expires_at
+                return last_plus
+            except Exception:
+                # Если продлить не вышло (например, клиента нет в inbound),
+                # сделаем best-effort cleanup и пересоздадим.
+                try:
+                    await delete_xui_client(email=str(last_plus.xui_email), inbound_id=int(settings.XUI_INBOUND_ID))
+                except Exception:
+                    pass
 
         # если нет активной Plus (или активная Infinite) — создаём новую
+        xui = await create_client_for_user_until(fake_id=fake_id, expires_at=expires_at)
         await session.execute(
             update(Subscription)
             .where(Subscription.user_id == user_id)

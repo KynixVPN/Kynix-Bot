@@ -440,9 +440,6 @@ async def cmd_subs_until(message: Message):
                 f"Текущий срок: <b>{active_sub.expires_at.strftime('%Y-%m-%d %H:%M')}</b>"
             )
 
-    # cleanup old X-UI config (if any) — inbound выбирается по текущему типу
-    await _try_delete_xui_for_fake_id(fake_id)
-
     sub = await upsert_plus_subscription_until(user.id, fake_id=fake_id, expires_at=expires_at)
 
     return await message.answer(
