@@ -15,13 +15,6 @@ logging.basicConfig(level=logging.INFO)
 
 
 async def refund_stars(user_id: int, charge_id: str, token: str | None = None):
-    """
-    Вызывает метод refundStarPayment у Telegram Bot API.
-
-    user_id  – НАСТОЯЩИЙ Telegram ID пользователя
-    charge_id – telegram_payment_charge_id
-    token    – токен бота, если None -> берём из settings.BOT_TOKEN
-    """
     if token is None:
         token = settings.BOT_TOKEN
 
@@ -43,12 +36,7 @@ async def refund_stars(user_id: int, charge_id: str, token: str | None = None):
 
 
 async def remove_user_subscription(fake_id: int):
-    """
-    Удаление VPN-клиента в XUI + деактивация подписки в БД.
-    """
-
     async with async_session() as session:
-        # ищем пользователя по fake_id
         res_user = await session.execute(
             select(User).where(User.fake_id == fake_id)
         )
@@ -56,7 +44,6 @@ async def remove_user_subscription(fake_id: int):
         if not user:
             raise ValueError(f"User with FakeID {fake_id} not found")
 
-        # подписка
         res_sub = await session.execute(
             select(Subscription)
             .where(Subscription.user_id == user.id, Subscription.active == True)  # noqa: E712
@@ -67,7 +54,6 @@ async def remove_user_subscription(fake_id: int):
         if not sub:
             return "No active subscription."
 
-        # удаляем клиента из XUI
         if sub.xui_email:
             try:
                 await delete_xui_client(sub.xui_email)
@@ -75,7 +61,6 @@ async def remove_user_subscription(fake_id: int):
             except Exception as e:
                 logger.warning(f"XUI delete failed: {e}")
 
-        # деактивируем подписку
         sub.active = False
         await session.commit()
 
@@ -83,13 +68,6 @@ async def remove_user_subscription(fake_id: int):
 
 
 async def refund_and_remove(fake_id: int, tg_user_id: int, charge_id: str):
-    """
-    Полный цикл:
-    1) Возврат Stars
-    2) Удаление подписки и XUI клиента
-    """
-
-    # 1) Возврат Stars
     logger.info("Refunding Stars...")
     res = await refund_stars(
         user_id=tg_user_id,
@@ -100,16 +78,10 @@ async def refund_and_remove(fake_id: int, tg_user_id: int, charge_id: str):
         logger.error(f"Refund ERROR: {res}")
         return f"❌ Refund failed: {res.get('description')}"
 
-    # 2) Удаление подписки
     logger.info("Removing subscription...")
     delete_msg = await remove_user_subscription(fake_id)
 
     return f"✅ REFUND DONE\n{delete_msg}"
-
-
-# ============================
-# CLI MODE (python payments_refund.py ...)
-# ============================
 
 async def main():
     if len(sys.argv) != 4:

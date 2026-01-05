@@ -15,13 +15,8 @@ def _get_salt() -> bytes:
 
 
 def hash_tg_id(real_id: int | str) -> str:
-    """
-    Telegram ID → SHA256 → Argon2id
-    (детерминированный, безопасный и неизвлекаемый)
-    """
     real_id = str(real_id)
 
-    # Стабильный SHA256 для одинакового ID
     fp = hashlib.sha256(real_id.encode()).hexdigest().encode()
 
     hashed = hash_secret_raw(

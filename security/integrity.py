@@ -7,7 +7,6 @@ from typing import Iterable
 def iter_project_files(base_path: str) -> Iterable[Path]:
     base = Path(base_path)
     for path in base.rglob("*.py"):
-        # skip venv and similar
         if any(part in {".venv", "venv", "__pycache__"} for part in path.parts):
             continue
         yield path

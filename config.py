@@ -25,21 +25,17 @@ class Settings(BaseSettings):
     XUI_INBOUND_ID: int
     XUI_INBOUND_ID_INF: int
 
-    # TLS / certificate pinning for XUI (recommended)
-    # Path to CA bundle (PEM). If set, httpx will trust only this CA (CA pinning).
+
     XUI_TLS_CA_CERT: str | None = None
-    # Optional mTLS client cert and key (PEM)
     XUI_TLS_CLIENT_CERT: str | None = None
     XUI_TLS_CLIENT_KEY: str | None = None
-    # Optional strict server certificate fingerprint pinning (sha256 of DER cert, hex)
-    # Example: 3A:4B:... or 3a4b... (colons/spaces allowed)
     XUI_TLS_FINGERPRINT_SHA256: str | None = None
 
     INSTRUCTION_URL: str
     PRIVACY_URL: str
     TERMS_URL: str
 
-    CODE_HASH: str          # обязателен
+    CODE_HASH: str       
     HASH_SALT: str
     MEMORY_CLEAN_INTERVAL_HOURS: int = 6
     PROVIDER_TOKEN: str | None = None
@@ -47,7 +43,6 @@ class Settings(BaseSettings):
     @field_validator("CODE_HASH", mode="before")
     @classmethod
     def validate_code_hash(cls, v: str) -> str:
-        # Нельзя без CODE_HASH и нельзя пустую строку
         if v is None:
             raise ValueError("CODE_HASH is required but not set")
         v = str(v).strip()
@@ -63,9 +58,7 @@ class Settings(BaseSettings):
         s = str(v).strip().lower()
         if not s:
             return None
-        # allow formats with ":" or spaces
         s = s.replace(":", "").replace(" ", "")
-        # basic sanity: hex length should be 64 (sha256)
         if len(s) != 64 or any(c not in "0123456789abcdef" for c in s):
             raise ValueError("XUI_TLS_FINGERPRINT_SHA256 must be a SHA256 hex fingerprint (64 hex chars)")
         return s

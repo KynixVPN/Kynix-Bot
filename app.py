@@ -2,16 +2,12 @@ import asyncio
 import logging
 import os
 from contextlib import suppress
-
 from aiogram import Bot, Dispatcher
 from aiogram.enums import ParseMode
 from aiogram.client.default import DefaultBotProperties
-
 from config import settings
 from security.integrity import verify_project_integrity
 from security.memory_store import start_schedulers
-
-# Routers
 from bot.routers.menu import router as menu_router
 from bot.routers.payment import router as payments_router
 from bot.routers.support import router as support_router
@@ -39,7 +35,6 @@ async def notify_admins_integrity_failed(bot: Bot, current_hash: str, reason: st
 
 
 async def main() -> None:
-    # ✅ Новый правильный способ задать parse_mode
     bot = Bot(
         token=settings.BOT_TOKEN,
         default=DefaultBotProperties(parse_mode=ParseMode.HTML)
@@ -47,18 +42,14 @@ async def main() -> None:
 
     dp = Dispatcher()
 
-    # Routers
     dp.include_router(menu_router)
     dp.include_router(payments_router)
     dp.include_router(support_router)
 
-    # Integrity check
     current_hash = verify_project_integrity(base_path=os.path.dirname(__file__))
 
-    # Приводим CODE_HASH к аккуратному виду
     code_hash = (settings.CODE_HASH or "").strip()
 
-    # 1️⃣ CODE_HASH обязателен и не может быть пустым
     if not code_hash:
         reason = "CODE_HASH не задан или пустой"
         logger.error(
@@ -69,15 +60,12 @@ async def main() -> None:
         await notify_admins_integrity_failed(bot, current_hash, reason)
         return
 
-    # 2️⃣ Стартуем ТОЛЬКО если хэш совпал
     if current_hash != code_hash:
         reason = f"Integrity check failed. Expected {code_hash}, got {current_hash}"
         logger.error(reason)
         await notify_admins_integrity_failed(bot, current_hash, reason)
         return
 
-    # Если мы тут — CODE_HASH валидный и совпал с текущим хэшем
-    # Background schedulers
     start_schedulers()
 
     logger.info("Bot started")

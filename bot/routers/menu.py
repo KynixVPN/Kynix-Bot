@@ -263,13 +263,6 @@ async def cmd_inf(message: Message):
 
 
 async def _try_delete_xui_for_fake_id(fake_id: int) -> tuple[bool, str | None]:
-    """Best-effort delete X-UI client for a given fake_id.
-
-    Chooses inbound based on the user's current subscription type when possible.
-
-    Returns:
-        (deleted: bool, error: str | None)
-    """
     sub = None
     try:
         user = await get_user_by_fakeid(fake_id)
@@ -298,7 +291,6 @@ async def _try_delete_xui_for_fake_id(fake_id: int) -> tuple[bool, str | None]:
 
 @router.message(F.text.startswith("/del"))
 async def cmd_del(message: Message):
-    """Admin-only: delete subscription and X-UI client by fake_id."""
     if message.from_user.id not in ADMINS:
         return await message.answer("❌ У вас нет прав.")
 
@@ -329,7 +321,6 @@ async def cmd_del(message: Message):
 
 @router.message(F.text.startswith("/month"))
 async def cmd_month(message: Message):
-    """Admin-only: grant 1 month Plus subscription by fake_id."""
     if message.from_user.id not in ADMINS:
         return await message.answer("❌ У вас нет прав.")
 
@@ -346,7 +337,6 @@ async def cmd_month(message: Message):
     if not user:
         return await message.answer("❌ Пользователь не найден.")
 
-    # cleanup old X-UI config (if any) and deactivate existing subs
     await _try_delete_xui_for_fake_id(fake_id)
     await deactivate_user_subscriptions(user.id)
 
@@ -360,7 +350,6 @@ async def cmd_month(message: Message):
 
 @router.message(F.text.startswith("/year"))
 async def cmd_year(message: Message):
-    """Admin-only: grant 1 year Plus subscription by fake_id."""
     if message.from_user.id not in ADMINS:
         return await message.answer("❌ У вас нет прав.")
 
@@ -377,7 +366,6 @@ async def cmd_year(message: Message):
     if not user:
         return await message.answer("❌ Пользователь не найден.")
 
-    # cleanup old X-UI config (if any) and deactivate existing subs
     await _try_delete_xui_for_fake_id(fake_id)
     await deactivate_user_subscriptions(user.id)
 
@@ -391,14 +379,6 @@ async def cmd_year(message: Message):
 
 @router.message(F.text.startswith("/subs"))
 async def cmd_subs_until(message: Message):
-    """Admin-only: grant/extend Plus subscription until a specific date.
-
-    Usage: /subs FAKE_ID DD.MM.YYYY
-
-    - If the user has an active Plus subscription, it will be extended to the given date
-      (never shortened).
-    - If the user has no active subscription or has Infinite, a new Plus subscription is created.
-    """
     if message.from_user.id not in ADMINS:
         return await message.answer("❌ У вас нет прав.")
 
@@ -424,14 +404,12 @@ async def cmd_subs_until(message: Message):
             "❌ Неверный формат даты. Используйте <code>ДД.ММ.ГГГГ</code>, например <code>01.01.2026</code>."
         )
 
-    # "до даты" — считаем включительно до конца дня (UTC)
     expires_at = d.replace(hour=23, minute=59, second=59, microsecond=0)
 
     user = await get_user_by_fakeid(fake_id)
     if not user:
         return await message.answer("❌ Пользователь не найден.")
 
-    # если уже активна Plus и дата не меньше текущей — ничего не делаем
     active_sub = await get_user_active_subscription(user.id)
     if active_sub and active_sub.expires_at is not None and active_sub.active:
         if active_sub.expires_at >= expires_at:
@@ -458,7 +436,6 @@ async def cmd_refresh(message: Message):
     user = await get_or_create_user(real_id)
     fake_id = user.fake_id
 
-    # Кулдаун 30 минут
     ok, remaining_sec = refresh_can_run(real_id)
     if not ok:
         remaining_min = max(5, (remaining_sec + 59) // 60)
@@ -467,7 +444,6 @@ async def cmd_refresh(message: Message):
             f"Попробуйте снова примерно через <b>{remaining_min}</b> мин."
         )
 
-    # Берём активную подписку
     sub = await get_user_active_subscription(user.id)
     if not sub:
         return await message.answer(
@@ -475,17 +451,13 @@ async def cmd_refresh(message: Message):
             "Откройте меню и оформите тариф <b>Plus</b>."
         )
 
-    # Определяем inbound по типу подписки
     inbound_id = int(settings.XUI_INBOUND_ID_INF) if sub.expires_at is None else int(settings.XUI_INBOUND_ID)
 
-    # 1) Удаляем старый конфиг в X-UI по fake_id (email)
     try:
         await delete_xui_client(email=str(fake_id), inbound_id=inbound_id)
     except Exception:
-        # если в X-UI его нет — это не критично, всё равно создадим новый
         pass
 
-    # 2) Создаём новый и обновляем запись подписки в БД
     try:
         sub = await refresh_subscription_config(sub=sub, fake_id=fake_id)
     except Exception as e:
@@ -494,7 +466,6 @@ async def cmd_refresh(message: Message):
             f"<code>{e}</code>"
         )
 
-    # отмечаем успешный запуск кулдауна
     refresh_mark_run(real_id)
 
     return await message.answer(

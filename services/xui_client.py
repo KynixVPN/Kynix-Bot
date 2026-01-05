@@ -20,24 +20,19 @@ class XuiError(Exception):
 
 
 def _get_httpx_tls_kwargs() -> dict:
-    """Build kwargs for httpx client with TLS settings from .env."""
     kwargs: dict = {}
-    # CA pinning: if XUI_TLS_CA_CERT is set, httpx trusts only that CA bundle
     if getattr(settings, "XUI_TLS_CA_CERT", None):
         kwargs["verify"] = settings.XUI_TLS_CA_CERT
-    # mTLS (client certificate)
     cert_path = getattr(settings, "XUI_TLS_CLIENT_CERT", None)
     key_path = getattr(settings, "XUI_TLS_CLIENT_KEY", None)
     if cert_path and key_path:
         kwargs["cert"] = (cert_path, key_path)
     elif cert_path and not key_path:
-        # allow single file containing both cert+key
         kwargs["cert"] = cert_path
     return kwargs
 
 
 async def _check_xui_cert_fingerprint() -> None:
-    """Optional strict certificate fingerprint pinning (sha256 of DER cert)."""
     expected = getattr(settings, "XUI_TLS_FINGERPRINT_SHA256", None)
     if not expected:
         return

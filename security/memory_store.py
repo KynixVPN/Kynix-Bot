@@ -4,16 +4,12 @@ from typing import Dict, Tuple
 
 from config import settings
 
-# real_ids: fake_id -> real_tg_id
 real_ids: Dict[int, int] = {}
 
-# support_real_ids: fake_id -> real_tg_id (не очищаем, пока тикет не закрыт)
 support_real_ids: Dict[int, int] = {}
 
-# refresh cooldowns: real_tg_id -> last_refresh_ts
 refresh_last_ts: Dict[int, float] = {}
 
-# 30 minutes
 REFRESH_COOLDOWN_SECONDS = 30 * 60
 
 
@@ -34,7 +30,6 @@ def get_real_id(fake_id: int) -> int | None:
 
 
 def refresh_can_run(real_tg_id: int) -> Tuple[bool, int]:
-    """Возвращает (можно ли выполнить, сколько секунд осталось до конца кулдауна)."""
     last = refresh_last_ts.get(real_tg_id)
     if not last:
         return True, 0

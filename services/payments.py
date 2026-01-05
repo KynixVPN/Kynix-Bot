@@ -29,32 +29,18 @@ TARIFFS: List[Tariff] = [
 
 
 def build_prices(tariff: Tariff) -> List[LabeledPrice]:
-    # Telegram Stars используются как обычные параметры цены
     return [LabeledPrice(label=tariff.title, amount=tariff.stars_amount)]
 
 
 async def handle_successful_payment(bot: Bot, message: Message, user: User, tariff: Tariff):
-    """
-    Вызывается:
-      — либо после real successful_payment
-      — либо из /testbuy для имитации покупки
-    """
     try:
-        # 🔹 создаём клиента в X-UI
         xui_data = await create_client_for_user(user.fake_id, days=tariff.days)
-        # xui_data ожидаем ТАКОЙ:
-        # {
-        #   "clientId": "uuid",
-        #   "config": "vless://...",
-        #   "email": "FAKE_ID"
-        # }
 
         config_text = xui_data["vless"]
         client_id = xui_data.get("clientId")
         email = xui_data.get("email")
 
     except XuiError as e:
-        # уведомить админов
         from config import settings as _s
 
         text_admin = (
@@ -74,7 +60,6 @@ async def handle_successful_payment(bot: Bot, message: Message, user: User, tari
         )
         return
 
-    # 🔹 сохраняем подписку в БД
     async with async_session() as session:
         sub = Subscription(
             user_id=user.id,
@@ -86,7 +71,6 @@ async def handle_successful_payment(bot: Bot, message: Message, user: User, tari
         session.add(sub)
         await session.commit()
 
-    # 🔹 отправляем конфиг пользователю
     await message.answer(
         "✅ Подписка активирована!\n"
         "Вот ваш VPN-конфиг:\n\n"
@@ -95,7 +79,6 @@ async def handle_successful_payment(bot: Bot, message: Message, user: User, tari
         f"- <a href=\"{settings.INSTRUCTION_URL}\">Инструкция по подключению Kynix VPN и приложения</a>"
     )
 
-    # 🔹 уведомление админам
     from config import settings as _s
 
     text_admin = (

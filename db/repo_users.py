@@ -9,10 +9,6 @@ from security.id_utils import generate_fake_id
 
 
 async def get_or_create_user(real_tg_id: int) -> User:
-    """
-    Не сохраняем реальный Telegram ID.
-    В базу кладём только tg_hash + fake_id.
-    """
     tg_hash = hash_tg_id(str(real_tg_id))
 
     async with async_session() as session:
