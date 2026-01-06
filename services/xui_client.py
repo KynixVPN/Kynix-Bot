@@ -48,7 +48,6 @@ async def _check_xui_cert_fingerprint() -> None:
 
     cafile = getattr(settings, "XUI_TLS_CA_CERT", None)
     ctx = ssl.create_default_context(cafile=cafile if cafile else None)
-    # ensure hostname verification
     ctx.check_hostname = True
     ctx.verify_mode = ssl.CERT_REQUIRED
 
@@ -90,11 +89,6 @@ def _build_xui_http_client() -> httpx.AsyncClient:
         follow_redirects=True,
         **tls_kwargs,
     )
-
-# ============================
-# LOGIN
-# ============================
-
 async def xui_login(client: httpx.AsyncClient):
     resp = await client.post(
         "/login",
@@ -103,11 +97,6 @@ async def xui_login(client: httpx.AsyncClient):
     )
     if resp.status_code != 200:
         raise XuiError(f"Failed to login: {resp.text}")
-
-
-# ============================
-# GET INBOUND BY ID
-# ============================
 
 async def get_inbound(client: httpx.AsyncClient, inbound_id: int):
     resp = await client.get("/panel/api/inbounds/list")
@@ -121,11 +110,6 @@ async def get_inbound(client: httpx.AsyncClient, inbound_id: int):
 
     raise XuiError(f"Inbound {inbound_id} not found")
 
-
-# ============================
-# PARSE HOST FROM XUI_BASE_URL
-# ============================
-
 def get_base_host():
     """
     Берёт хост из XUI_BASE_URL:
@@ -134,11 +118,6 @@ def get_base_host():
     """
     url = settings.XUI_BASE_URL.replace("http://", "").replace("https://", "")
     return url.split(":")[0]
-
-
-# ============================
-# BUILD VLESS REALITY LINK
-# ============================
 
 def build_vless(uid, host, port, tag, fake_id, pbk, sid):
     return (
@@ -155,20 +134,13 @@ def build_vless(uid, host, port, tag, fake_id, pbk, sid):
         f"#Kynix-VPN-{tag}-{fake_id}"
     )
 
-
-# ============================
-# ADD CLIENT
-# ============================
-
 async def create_xui_client(fake_id: int, expiry_ts: int, tag: str, inbound_id: int):
     await _check_xui_cert_fingerprint()
 
     async with _build_xui_http_client() as client:
 
-        # login
         await xui_login(client)
 
-        # inbound info
         inbound = await get_inbound(client, inbound_id)
 
         stream_obj = json.loads(inbound["streamSettings"])
@@ -177,12 +149,10 @@ async def create_xui_client(fake_id: int, expiry_ts: int, tag: str, inbound_id: 
         pbk = reality["settings"]["publicKey"]
         sid = reality["shortIds"][0]
 
-        # host = inbound.get("listen") or inbound.get("address")
-        host = get_base_host()  # <--- заменено
+        host = get_base_host()  
 
         port = inbound["port"]
 
-        # client values
         uid = str(uuid.uuid4())
         subid = uuid.uuid4().hex[:16]
         email = f"{fake_id}"
@@ -199,7 +169,6 @@ async def create_xui_client(fake_id: int, expiry_ts: int, tag: str, inbound_id: 
             "flow": "xtls-rprx-vision",
         }
 
-        # Send request to add client
         resp = await client.post(
             "/panel/api/inbounds/addClient",
             json={
@@ -218,7 +187,6 @@ async def create_xui_client(fake_id: int, expiry_ts: int, tag: str, inbound_id: 
         except:
             pass
 
-        # Build final VLESS
         vless = build_vless(uid, host, port, tag, fake_id, pbk, sid)
 
         return {
@@ -228,10 +196,6 @@ async def create_xui_client(fake_id: int, expiry_ts: int, tag: str, inbound_id: 
             "vless": vless,
         }
 
-
-# ============================
-# CREATE PLUS
-# ============================
 
 async def create_client_for_user(fake_id: int, days: int):
     expiry_ts = int(time.time() * 1000 + days * 86400 * 1000)
@@ -244,18 +208,7 @@ async def create_client_for_user(fake_id: int, days: int):
         inbound_id=inbound_plus,
     )
 
-
-# ============================
-# CREATE PLUS UNTIL EXACT DATETIME (UTC)
-# ============================
-
 async def create_client_for_user_until(fake_id: int, expires_at: datetime):
-    """Создаёт Plus клиента в X-UI до конкретной даты/времени.
-
-    В БД в проекте используются naive datetime в UTC (через datetime.utcnow()),
-    поэтому здесь считаем, что expires_at тоже в UTC.
-    """
-    # Convert to epoch milliseconds; treat naive datetime as UTC
     if expires_at.tzinfo is None:
         expires_at = expires_at.replace(tzinfo=timezone.utc)
     expiry_ts = int(expires_at.timestamp() * 1000)
@@ -268,11 +221,6 @@ async def create_client_for_user_until(fake_id: int, expires_at: datetime):
         inbound_id=inbound_plus,
     )
 
-
-# ============================
-# CREATE INFINITE
-# ============================
-
 async def create_client_inf(fake_id: int):
     inbound_inf = int(settings.XUI_INBOUND_ID_INF)
 
@@ -282,11 +230,6 @@ async def create_client_inf(fake_id: int):
         tag="Inf",
         inbound_id=inbound_inf,
     )
-
-
-# ============================
-# DELETE CLIENT BY EMAIL
-# ============================
 
 async def delete_xui_client(email: str, inbound_id: int | None = None):
     inbound_id = inbound_id or int(settings.XUI_INBOUND_ID)
@@ -331,19 +274,7 @@ async def delete_xui_client(email: str, inbound_id: int | None = None):
             inbound_id,
         )
 
-
-# ============================
-# UPDATE CLIENT EXPIRY (KEEP UUID)
-# ============================
-
 async def update_xui_client_expiry(email: str, inbound_id: int, expiry_ts: int) -> dict:
-    """Продлевает срок существующего клиента в X-UI, не меняя UUID/ссылку.
-
-    Находит клиента по email (у нас это fake_id в строке) в указанном inbound и
-    обновляет поле expiryTime.
-
-    Возвращает найденного/обновлённого клиента (dict) из inbound.settings.
-    """
     await _check_xui_cert_fingerprint()
 
     async with _build_xui_http_client() as client:
@@ -360,7 +291,6 @@ async def update_xui_client_expiry(email: str, inbound_id: int, expiry_ts: int) 
         if idx is None:
             raise XuiError(f"Client {email} not found in inbound {inbound_id}")
 
-        # mutate expiry in-place
         clients[idx]["expiryTime"] = int(expiry_ts)
 
         payload = {
@@ -368,8 +298,6 @@ async def update_xui_client_expiry(email: str, inbound_id: int, expiry_ts: int) 
             "settings": json.dumps({"clients": clients}, ensure_ascii=False),
         }
 
-        # Different X-UI / 3x-ui versions expose different endpoints.
-        # Try common variants.
         last_err: str | None = None
         for url in (
             "/panel/api/inbounds/updateClient",
