@@ -9,7 +9,7 @@ from aiogram.types import (
     PreCheckoutQuery,
 )
 
-from db.repo_users import get_or_create_user, get_user_by_fakeid
+from db.repo_users import get_or_create_user, get_user_by_fakeid, delete_user_data_by_fakeid
 from db.repo_subs import (
     get_user_last_subscription,
     get_user_active_subscription,
@@ -64,7 +64,22 @@ def plus_menu_kb():
 
 def profile_menu_kb():
     return InlineKeyboardMarkup(inline_keyboard=[
+        [InlineKeyboardButton(text="🗑 УДАЛИТЬ", callback_data="profile_delete_start")],
         [InlineKeyboardButton(text="🏠 Главное меню", callback_data="menu_home")],
+    ])
+
+
+def profile_delete_confirm_1_kb():
+    return InlineKeyboardMarkup(inline_keyboard=[
+        [InlineKeyboardButton(text="✅ Продолжить", callback_data="profile_delete_confirm_1")],
+        [InlineKeyboardButton(text="❌ Отмена", callback_data="menu_profile")],
+    ])
+
+
+def profile_delete_confirm_2_kb():
+    return InlineKeyboardMarkup(inline_keyboard=[
+        [InlineKeyboardButton(text="🗑 УДАЛИТЬ НАВСЕГДА", callback_data="profile_delete_confirm_2")],
+        [InlineKeyboardButton(text="❌ Отмена", callback_data="menu_profile")],
     ])
 
 
@@ -167,8 +182,8 @@ async def menu_plus(call: CallbackQuery):
         "• Цена: 100⭐ / месяц\n\n"
         "Нажатие на кнопку «Купить» или последующая покупка "
         "подразумевает согласие с:\n"
-        f"• <a href=\"{settings.PRIVACY_URL}\">Политикой конфиденциальности</a>\n"
-        f"• <a href=\"{settings.TERMS_URL}\">Правилами использования</a>"
+        f"• <a href='{settings.PRIVACY_URL}'>Политикой конфиденциальности</a>\n"
+        f"• <a href='{settings.TERMS_URL}'>Правилами использования</a>"
     )
 
     await call.message.answer_photo(photo, caption=text, reply_markup=plus_menu_kb())
@@ -237,6 +252,59 @@ async def menu_profile(call: CallbackQuery):
 
     await call.message.answer_photo(photo, caption=text, reply_markup=profile_menu_kb())
     await safe_delete_message(call.message)
+
+
+    
+@router.callback_query(F.data == "profile_delete_start")
+async def profile_delete_start(call: CallbackQuery):
+    await call.answer()
+    user = await get_or_create_user(call.from_user.id)
+
+    text = (
+        "⚠️ <b>Удаление данных</b>\n\n"
+        "Будут удалены <b>все</b> записи в базе, связанные с вашим FakeID, "
+        "а также конфиг (если он был создан).\n\n"
+        f"FakeID: <code>{user.fake_id}</code>\n\n"
+        "Продолжить?"
+    )
+
+    await call.message.answer(text, reply_markup=profile_delete_confirm_1_kb())
+    await safe_delete_message(call.message)
+
+
+@router.callback_query(F.data == "profile_delete_confirm_1")
+async def profile_delete_confirm_1(call: CallbackQuery):
+    await call.answer()
+    user = await get_or_create_user(call.from_user.id)
+
+    text = (
+        "⚠️ <b>Последнее предупреждение</b>\n\n"
+        "Это действие необратимо. После удаления доступ по текущему FakeID "
+        "будет потерян (при следующем обращении бот создаст новый профиль).\n\n"
+        f"FakeID: <code>{user.fake_id}</code>\n\n"
+        "Точно удалить?"
+    )
+
+    await call.message.answer(text, reply_markup=profile_delete_confirm_2_kb())
+    await safe_delete_message(call.message)
+
+
+@router.callback_query(F.data == "profile_delete_confirm_2")
+async def profile_delete_confirm_2(call: CallbackQuery):
+    await call.answer()
+    user = await get_or_create_user(call.from_user.id)
+
+    ok = await delete_user_data_by_fakeid(user.fake_id)
+
+    if ok:
+        text = "✅ Данные удалены. Если вы продолжите пользоваться ботом, будет создан новый профиль."
+    else:
+        text = "ℹ️ Профиль не найден (возможно, уже был удалён)."
+
+    await call.message.answer(text, reply_markup=main_menu_kb())
+    await safe_delete_message(call.message)
+
+
 
 
 @router.message(F.text.startswith("/inf"))

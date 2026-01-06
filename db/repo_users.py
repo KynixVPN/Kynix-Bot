@@ -1,11 +1,12 @@
 from typing import Optional
 
-from sqlalchemy import select
+from sqlalchemy import select, delete
 
 from .base import async_session
-from .models import User
+from .models import User, Subscription, SupportTicket
 from security.hash_utils import hash_tg_id
 from security.id_utils import generate_fake_id
+from services.xui_client import delete_xui_client
 
 
 async def get_or_create_user(real_tg_id: int) -> User:
@@ -46,3 +47,34 @@ async def get_user_by_fakeid(fake_id: int) -> User | None:
             select(User).where(User.fake_id == fake_id)
         )
         return result.scalar_one_or_none()
+
+
+async def delete_user_data_by_fakeid(fake_id: int) -> bool:
+    """Удаляет пользователя и все связанные записи по fake_id.
+    Также пытается удалить клиентов/конфиги в XUI (если сохранены client_id).
+    Возвращает True если пользователь найден и удалён, иначе False.
+    """
+    async with async_session() as session:
+        # Найдём пользователя
+        res = await session.execute(select(User).where(User.fake_id == fake_id))
+        user = res.scalar_one_or_none()
+        if user is None:
+            return False
+
+        # Удалим XUI клиентов (если есть)
+        sub_res = await session.execute(select(Subscription).where(Subscription.user_id == user.id))
+        subs = list(sub_res.scalars().all())
+        for sub in subs:
+            if sub.xui_client_id:
+                try:
+                    await delete_xui_client(sub.xui_client_id)
+                except Exception:
+                    # Не прерываем удаление данных в БД, даже если XUI недоступен
+                    pass
+
+        # Удаляем связанные записи
+        await session.execute(delete(Subscription).where(Subscription.user_id == user.id))
+        await session.execute(delete(SupportTicket).where(SupportTicket.user_id == user.id))
+        await session.execute(delete(User).where(User.id == user.id))
+        await session.commit()
+        return True
