@@ -6,7 +6,7 @@ from db.base import async_session
 from db.models import Subscription, User
 from config import settings
 
-from services.xui_client import (
+from services.xui_client import (, create_client_for_user_until
     create_client_inf,
     create_client_for_user,
     create_client_for_user_until,
@@ -40,11 +40,7 @@ async def refresh_subscription_config(sub: Subscription, fake_id: int):
     if sub.expires_at is None:
         xui = await create_client_inf(fake_id=fake_id)
     else:
-        now = datetime.utcnow()
-        delta = sub.expires_at - now
-        days_left = max(1, math.ceil(delta.total_seconds() / 86400))
-        xui = await create_client_for_user(fake_id=fake_id, days=days_left)
-
+        xui = await create_client_for_user_until(fake_id=fake_id, expires_at=sub.expires_at)
     async with async_session() as session:
         await session.execute(
             update(Subscription)

@@ -1,5 +1,6 @@
 from dataclasses import dataclass
 from typing import List
+from datetime import datetime, timedelta
 
 from aiogram import Bot
 from aiogram.types import LabeledPrice, PreCheckoutQuery, Message
@@ -60,10 +61,14 @@ async def handle_successful_payment(bot: Bot, message: Message, user: User, tari
         )
         return
 
+    expires_at = None if not getattr(tariff, 'days', None) else datetime.utcnow() + timedelta(days=tariff.days)
+
+
     async with async_session() as session:
         sub = Subscription(
             user_id=user.id,
             active=True,
+            expires_at=expires_at,
             xui_client_id=str(client_id) if client_id else None,
             xui_email=email,
             xui_config=config_text,
