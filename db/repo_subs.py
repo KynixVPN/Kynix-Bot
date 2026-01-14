@@ -6,7 +6,7 @@ from db.base import async_session
 from db.models import Subscription, User
 from config import settings
 
-from services.xui_client import (, create_client_for_user_until
+from services.xui_client import (
     create_client_inf,
     create_client_for_user,
     create_client_for_user_until,
