@@ -322,11 +322,11 @@ async def cmd_inf(message: Message):
     if not user:
         return await message.answer("❌ Пользователь не найден.")
 
-    sub = await create_subscription_inf(user.id, fake_id)
+    sub, cfg = await create_subscription_inf(user.id, fake_id)
 
     return await message.answer(
         "🎁 Выдана <b>бессрочная подписка</b>!\n\n"
-        f"<code>{sub.xui_config}</code>"
+        f"<code>{cfg}</code>"
     )
 
 
@@ -408,11 +408,11 @@ async def cmd_month(message: Message):
     await _try_delete_xui_for_fake_id(fake_id)
     await deactivate_user_subscriptions(user.id)
 
-    sub = await create_subscription(user.id, days=30)
+    sub, cfg = await create_subscription(user.id, days=30)
 
     return await message.answer(
         "📅 Выдана подписка на <b>1 месяц</b>!\n\n"
-        f"<code>{sub.xui_config}</code>"
+        f"<code>{cfg}</code>"
     )
 
 
@@ -437,11 +437,11 @@ async def cmd_year(message: Message):
     await _try_delete_xui_for_fake_id(fake_id)
     await deactivate_user_subscriptions(user.id)
 
-    sub = await create_subscription(user.id, days=365)
+    sub, cfg = await create_subscription(user.id, days=365)
 
     return await message.answer(
         "📅 Выдана подписка на <b>1 год</b>!\n\n"
-        f"<code>{sub.xui_config}</code>"
+        f"<code>{cfg}</code>"
     )
 
 
@@ -486,11 +486,11 @@ async def cmd_subs_until(message: Message):
                 f"Текущий срок: <b>{active_sub.expires_at.strftime('%Y-%m-%d %H:%M')}</b>"
             )
 
-    sub = await upsert_plus_subscription_until(user.id, fake_id=fake_id, expires_at=expires_at)
+    sub, cfg = await upsert_plus_subscription_until(user.id, fake_id=fake_id, expires_at=expires_at)
 
     return await message.answer(
         "📅 Подписка Plus выдана/продлена до <b>{}</b>!\n\n"
-        "<code>{}</code>".format(sub.expires_at.strftime("%Y-%m-%d %H:%M"), sub.xui_config)
+        "<code>{}</code>".format(sub.expires_at.strftime("%Y-%m-%d %H:%M"), cfg)
     )
 
 
@@ -527,7 +527,7 @@ async def cmd_refresh(message: Message):
         pass
 
     try:
-        sub = await refresh_subscription_config(sub=sub, fake_id=fake_id)
+        cfg = await refresh_subscription_config(sub=sub, fake_id=fake_id)
     except Exception as e:
         return await message.answer(
             "❌ Ошибка при создании нового конфига:\n"
@@ -538,7 +538,7 @@ async def cmd_refresh(message: Message):
 
     return await message.answer(
         "✅ Конфиг обновлён!\n\n"
-        f"<code>{sub.xui_config}</code>"
+        f"<code>{cfg}</code>"
     )
 
 @router.message(F.text.startswith("/refund"))

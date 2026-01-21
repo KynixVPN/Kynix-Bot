@@ -316,7 +316,7 @@ async def support_messages(message: Message):
                 ticket = SupportTicket(user_id=user.id, is_open=True)
                 session.add(ticket)
 
-            ticket.last_message = message.text or message.caption or f"<{message.content_type}>"
+            # Do not persist user message payload in DB
             await session.commit()
             await session.refresh(ticket)
 

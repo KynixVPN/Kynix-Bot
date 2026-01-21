@@ -69,9 +69,7 @@ async def handle_successful_payment(bot: Bot, message: Message, user: User, tari
             user_id=user.id,
             active=True,
             expires_at=expires_at,
-            xui_client_id=str(client_id) if client_id else None,
             xui_email=email,
-            xui_config=config_text,
         )
         session.add(sub)
         await session.commit()

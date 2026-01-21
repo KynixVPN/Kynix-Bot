@@ -1,7 +1,7 @@
 from datetime import datetime
 from typing import Optional
 
-from sqlalchemy import String, Integer, DateTime, Boolean, ForeignKey, Text
+from sqlalchemy import String, Integer, DateTime, Boolean, ForeignKey
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from .base import Base
@@ -24,11 +24,12 @@ class Subscription(Base):
 
     id: Mapped[int] = mapped_column(primary_key=True, autoincrement=True)
     user_id: Mapped[int] = mapped_column(ForeignKey("users.id"))
+
     active: Mapped[bool] = mapped_column(Boolean, default=True)
     expires_at: Mapped[Optional[datetime]] = mapped_column(DateTime, nullable=True, default=None)
-    xui_client_id: Mapped[Optional[str]] = mapped_column(String(255), nullable=True)
+
+    # Do not store VLESS UUID/link in DB. Email (fake_id) is enough to find the client in X-UI.
     xui_email: Mapped[Optional[str]] = mapped_column(String(255), nullable=True)
-    xui_config: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
 
     created_at: Mapped[datetime] = mapped_column(default=datetime.utcnow)
 
@@ -45,6 +46,5 @@ class SupportTicket(Base):
     created_at: Mapped[datetime] = mapped_column(default=datetime.utcnow)
     closed_at: Mapped[Optional[datetime]] = mapped_column(nullable=True)
 
-    last_message: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
-
+    # Do not store the last support message in DB.
     user: Mapped["User"] = relationship(back_populates="support_tickets")

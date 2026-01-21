@@ -134,6 +134,51 @@ def build_vless(uid, host, port, tag, fake_id, pbk, sid):
         f"#Kynix-VPN-{tag}-{fake_id}"
     )
 
+
+def _infer_inbound_and_tag(expires_at):
+    """Return (inbound_id, tag) matching how we create clients."""
+    if expires_at is None:
+        return int(settings.XUI_INBOUND_ID_INF), "Inf"
+    return int(settings.XUI_INBOUND_ID), "Plus"
+
+
+async def build_vless_for_email(*, email: str, fake_id: int, expires_at, inbound_id: int | None = None, tag: str | None = None) -> str:
+    """Build a VLESS link for an existing X-UI client without storing it in the DB.
+
+    We find the client UUID by `email` inside inbound settings, then rebuild the same
+    VLESS URI as `create_xui_client` does.
+    """
+    if inbound_id is None or tag is None:
+        inbound_id2, tag2 = _infer_inbound_and_tag(expires_at)
+        inbound_id = inbound_id or inbound_id2
+        tag = tag or tag2
+
+    await _check_xui_cert_fingerprint()
+
+    async with _build_xui_http_client() as client:
+        await xui_login(client)
+        inbound = await get_inbound(client, int(inbound_id))
+
+        stream_obj = json.loads(inbound["streamSettings"])
+        reality = stream_obj["realitySettings"]
+        pbk = reality["settings"]["publicKey"]
+        sid = reality["shortIds"][0]
+
+        host = get_base_host()
+        port = inbound["port"]
+
+        settings_obj = json.loads(inbound["settings"])
+        clients = settings_obj.get("clients", [])
+
+        client_obj = next((c for c in clients if str(c.get("email")) == str(email)), None)
+        if client_obj is None:
+            raise XuiError(f"Client {email} not found in inbound {inbound_id}")
+
+        uid = client_obj.get("id") or client_obj.get("uuid")
+        if not uid:
+            raise XuiError(f"Client {email} has no uuid/id in inbound {inbound_id}")
+
+        return build_vless(uid, host, port, tag, fake_id, pbk, sid)
 async def create_xui_client(fake_id: int, expiry_ts: int, tag: str, inbound_id: int):
     await _check_xui_cert_fingerprint()
 
