@@ -58,28 +58,28 @@ def main_menu_kb():
 def plus_menu_kb():
     return InlineKeyboardMarkup(inline_keyboard=[
         [InlineKeyboardButton(text="Купить", callback_data="menu_buy_plus")],
-        [InlineKeyboardButton(text="🏠 Главное меню", callback_data="menu_home")],
+        [InlineKeyboardButton(text="Главное меню", callback_data="menu_home")],
     ])
 
 
 def profile_menu_kb():
     return InlineKeyboardMarkup(inline_keyboard=[
-        [InlineKeyboardButton(text="🗑 УДАЛИТЬ", callback_data="profile_delete_start")],
-        [InlineKeyboardButton(text="🏠 Главное меню", callback_data="menu_home")],
+        [InlineKeyboardButton(text="Удалить", callback_data="profile_delete_start")],
+        [InlineKeyboardButton(text="Главное меню", callback_data="menu_home")],
     ])
 
 
 def profile_delete_confirm_1_kb():
     return InlineKeyboardMarkup(inline_keyboard=[
-        [InlineKeyboardButton(text="✅ Продолжить", callback_data="profile_delete_confirm_1")],
-        [InlineKeyboardButton(text="❌ Отмена", callback_data="menu_profile")],
+        [InlineKeyboardButton(text="Продолжить", callback_data="profile_delete_confirm_1")],
+        [InlineKeyboardButton(text="Отмена", callback_data="menu_profile")],
     ])
 
 
 def profile_delete_confirm_2_kb():
     return InlineKeyboardMarkup(inline_keyboard=[
-        [InlineKeyboardButton(text="🗑 УДАЛИТЬ НАВСЕГДА", callback_data="profile_delete_confirm_2")],
-        [InlineKeyboardButton(text="❌ Отмена", callback_data="menu_profile")],
+        [InlineKeyboardButton(text="Удалить навсегда", callback_data="profile_delete_confirm_2")],
+        [InlineKeyboardButton(text="Отмена", callback_data="menu_profile")],
     ])
 
 
@@ -87,7 +87,7 @@ def profile_delete_confirm_2_kb():
 def support_menu_kb():
     return InlineKeyboardMarkup(inline_keyboard=[
         [InlineKeyboardButton(text="Закрыть обращение", callback_data="support_close_user")],
-        [InlineKeyboardButton(text="⬅️ Назад", callback_data="menu_home")]
+        [InlineKeyboardButton(text="Назад", callback_data="menu_home")]
     ])
 
 
@@ -119,9 +119,9 @@ async def menu_support(call: CallbackQuery):
             new_ticket_created = True
 
     text = (
-        "🛠 <b>Поддержка</b>\n\n"
+        "<b>Поддержка</b>\n\n"
         "Опишите вашу проблему в сообщении.\n"
-        "Ваши сообщения будут отправлены администратору.\n\n"
+        "Ваши сообщения будут отправлены команде поддержки.\n\n"
         "Если вопрос решён — закройте обращение кнопкой ниже."
     )
 
@@ -158,11 +158,11 @@ async def cmd_start(message: Message):
 
     text = (
         "<b>Добро пожаловать в Kynix VPN 💜</b>\n\n"
-        "<b>📦 Тарифный план:</b>\n\n"
+        "<b>Тарифный план:</b>\n\n"
         "<b>Plus</b>\n"
         "• Безлимитный трафик\n"
         "• 10 устройств\n"
-        "• Цена: 100⭐ / месяц\n\n"
+        "• Цена: 100 ⭐ / месяц\n\n"
         f"Ваш Fake ID: <code>{user.fake_id}</code>"
     )
 
@@ -179,7 +179,7 @@ async def menu_plus(call: CallbackQuery):
         "• Безлимитный трафик\n"
         "• До 10 устройств\n"
         "• Приоритетная поддержка\n"
-        "• Цена: 100⭐ / месяц\n\n"
+        "• Цена: 100 ⭐ / месяц\n\n"
         "Нажатие на кнопку «Купить» или последующая покупка "
         "подразумевает согласие с:\n"
         f"• <a href='{settings.PRIVACY_URL}'>Политикой конфиденциальности</a>\n"
@@ -241,7 +241,7 @@ async def menu_profile(call: CallbackQuery):
         if sub.expires_at:
             expires = sub.expires_at.strftime("%Y-%m-%d %H:%M")
 
-    photo = FSInputFile("images/start.jpg")
+    photo = FSInputFile("images/profile.jpg")
 
     text = (
         "<b>Ваш профиль</b>\n\n"
@@ -280,7 +280,7 @@ async def profile_delete_confirm_1(call: CallbackQuery):
     text = (
         "⚠️ <b>Последнее предупреждение</b>\n\n"
         "Это действие необратимо. После удаления доступ "
-        "будет потерян (при следующем обращении бот создаст новый профиль).\n\n"
+        "будет потерян. При следующем запуске бот создаст новый профиль.\n\n"
         f"FakeID: <code>{user.fake_id}</code>\n\n"
         "Точно удалить?"
     )
@@ -530,14 +530,14 @@ async def cmd_refresh(message: Message):
         cfg = await refresh_subscription_config(sub=sub, fake_id=fake_id)
     except Exception as e:
         return await message.answer(
-            "❌ Ошибка при создании нового конфига:\n"
+            "Ошибка при создании нового конфига:\n"
             f"<code>{e}</code>"
         )
 
     refresh_mark_run(real_id)
 
     return await message.answer(
-        "✅ Конфиг обновлён!\n\n"
+        "Конфиг обновлён!\n\n"
         f"<code>{cfg}</code>"
     )
 
@@ -616,7 +616,7 @@ async def menu_home(call: CallbackQuery):
         "<b>Plus</b>\n"
         "• Безлимитный VPN\n"
         "• 10 устройств\n"
-        "• Цена: 100⭐ / месяц\n\n"
+        "• Цена: 100 ⭐ / месяц\n\n"
         f"Ваш FakeID: <code>{user.fake_id}</code>"
     )
 
