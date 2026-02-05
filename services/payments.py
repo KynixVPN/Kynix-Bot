@@ -9,6 +9,7 @@ from config import settings
 from db.base import async_session
 from db.models import Subscription, User
 from services.xui_client import create_client_for_user, XuiError
+from services.buy_control import apply_buy_settings
 
 
 @dataclass
@@ -27,6 +28,9 @@ TARIFFS: List[Tariff] = [
         days=31,
     ),
 ]
+
+# Apply runtime settings (price + open/closed) from JSON.
+apply_buy_settings(TARIFFS)
 
 
 def build_prices(tariff: Tariff) -> List[LabeledPrice]:

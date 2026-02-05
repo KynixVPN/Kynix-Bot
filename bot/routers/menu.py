@@ -21,6 +21,7 @@ from db.repo_subs import (
 )
 
 from services.payments import TARIFFS, build_prices, handle_successful_payment
+from services.buy_control import apply_buy_settings, is_buy_enabled
 from services.payments_refund import refund_stars
 from services.xui_client import delete_xui_client
 
@@ -117,7 +118,6 @@ async def menu_support(call: CallbackQuery):
             await session.commit()
             await session.refresh(ticket)
             new_ticket_created = True
-
     text = (
         "<b>Поддержка</b>\n\n"
         "Опишите вашу проблему в сообщении.\n"
@@ -125,18 +125,13 @@ async def menu_support(call: CallbackQuery):
         "Если вопрос решён — закройте обращение кнопкой ниже."
     )
 
+    photo = FSInputFile("images/support.jpg")
     try:
-        if call.message.text:
-            await call.message.edit_text(text, reply_markup=support_menu_kb())
-        elif call.message.caption:
-            await call.message.edit_caption(
-                caption=text,
-                reply_markup=support_menu_kb()
-            )
-        else:
-            await call.message.answer(text, reply_markup=support_menu_kb())
+        await call.message.answer_photo(photo, caption=text, reply_markup=support_menu_kb())
+        await safe_delete_message(call.message)
     except Exception:
         await call.message.answer(text, reply_markup=support_menu_kb())
+        await safe_delete_message(call.message)
 
     if new_ticket_created:
         text_admin = f"""📩 Обращение в поддержку
@@ -154,6 +149,9 @@ Ticket ID: {ticket.id}
 async def cmd_start(message: Message):
     user = await get_or_create_user(message.from_user.id)
 
+    apply_buy_settings(TARIFFS)
+    price = TARIFFS[0].stars_amount
+
     photo = FSInputFile("images/start.jpg")
 
     text = (
@@ -162,7 +160,7 @@ async def cmd_start(message: Message):
         "<b>Plus</b>\n"
         "• Безлимитный трафик\n"
         "• 10 устройств\n"
-        "• Цена: 100 ⭐ / месяц\n\n"
+        f"• Цена: {price} ⭐ / месяц\n\n"
         f"Ваш Fake ID: <code>{user.fake_id}</code>"
     )
 
@@ -173,13 +171,16 @@ async def cmd_start(message: Message):
 async def menu_plus(call: CallbackQuery):
     await call.answer()
 
+    apply_buy_settings(TARIFFS)
+    price = TARIFFS[0].stars_amount
+
     photo = FSInputFile("images/plus.jpg")
     text = (
         "<b>Тариф Plus</b>\n\n"
         "• Безлимитный трафик\n"
         "• До 10 устройств\n"
         "• Приоритетная поддержка\n"
-        "• Цена: 100 ⭐ / месяц\n\n"
+        f"• Цена: {price} ⭐ / месяц\n\n"
         "Нажатие на кнопку «Купить» или последующая покупка "
         "подразумевает согласие с:\n"
         f"• <a href='{settings.PRIVACY_URL}'>Политикой конфиденциальности</a>\n"
@@ -195,6 +196,11 @@ async def menu_plus(call: CallbackQuery):
 @router.callback_query(F.data == "menu_buy_plus")
 async def menu_buy_plus(call: CallbackQuery):
     await call.answer()
+
+    if not is_buy_enabled(TARIFFS):
+        return await call.message.answer("🚫 Покупка временно закрыта. Попробуйте позже.")
+
+    apply_buy_settings(TARIFFS)
 
     tariff = TARIFFS[0]
 
@@ -609,6 +615,8 @@ async def menu_home(call: CallbackQuery):
     await call.answer()
 
     user = await get_or_create_user(call.from_user.id)
+    apply_buy_settings(TARIFFS)
+    price = TARIFFS[0].stars_amount
     photo = FSInputFile("images/start.jpg")
 
     text = (
@@ -616,7 +624,7 @@ async def menu_home(call: CallbackQuery):
         "<b>Plus</b>\n"
         "• Безлимитный VPN\n"
         "• 10 устройств\n"
-        "• Цена: 100 ⭐ / месяц\n\n"
+        f"• Цена: {price} ⭐ / месяц\n\n"
         f"Ваш FakeID: <code>{user.fake_id}</code>"
     )
 
