@@ -10,6 +10,7 @@ from db.base import async_session
 from db.models import SupportTicket, User
 from db.repo_users import get_or_create_user
 from security.memory_store import remember_support_user, forget_support_user, get_real_id
+from security.admin_guard import require_admin_login
 
 router = Router(name="support")
 
@@ -164,6 +165,8 @@ async def support_close_user(call: CallbackQuery):
 async def cmd_close_ticket(message: Message):
     if message.from_user.id not in settings.ADMINS:
         return
+    if not await require_admin_login(message):
+        return
 
     replied = message.reply_to_message
     fake_id = _extract_fake_id(replied)
@@ -219,6 +222,8 @@ async def cmd_close_ticket(message: Message):
 @router.message()
 async def support_messages(message: Message):
     if message.from_user.id in settings.ADMINS and message.reply_to_message:
+        if not await require_admin_login(message):
+            return
         replied = message.reply_to_message
 
         fake_id = _extract_fake_id(replied)

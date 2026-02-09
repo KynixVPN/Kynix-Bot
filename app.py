@@ -11,6 +11,7 @@ from security.memory_store import start_schedulers
 from bot.routers.menu import router as menu_router
 from bot.routers.payment import router as payments_router
 from bot.routers.support import router as support_router
+from bot.routers.auth import login_router
 
 
 logging.basicConfig(
@@ -42,6 +43,7 @@ async def main() -> None:
 
     dp = Dispatcher()
 
+    dp.include_router(login_router)
     dp.include_router(menu_router)
     dp.include_router(payments_router)
     dp.include_router(support_router)

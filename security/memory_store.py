@@ -3,6 +3,7 @@ import time
 from typing import Dict, Tuple
 
 from config import settings
+from security.admin_session import clear_admin_sessions
 
 real_ids: Dict[int, int] = {}
 
@@ -49,6 +50,7 @@ async def clean_memory():
         await asyncio.sleep(settings.MEMORY_CLEAN_INTERVAL_HOURS * 3600)
         real_ids.clear()
         refresh_last_ts.clear()
+        clear_admin_sessions()
 
 
 def start_schedulers():

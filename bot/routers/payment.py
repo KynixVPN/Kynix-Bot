@@ -5,6 +5,7 @@ from aiogram.filters import Command
 from db.repo_users import get_or_create_user
 from services.payments import TARIFFS, build_prices, handle_successful_payment
 from config import ADMINS
+from security.admin_guard import require_admin_login
 from services.buy_control import (
     apply_buy_settings,
     is_buy_enabled,
@@ -25,6 +26,9 @@ async def cmd_closebuy(message: Message):
     if not _is_admin(message.from_user.id):
         return await message.answer("❌ У вас нет прав для этой команды.")
 
+    if not await require_admin_login(message):
+        return
+
     # Toggle enabled flag
     currently_enabled = is_buy_enabled(TARIFFS)
     data = set_buy_enabled(not currently_enabled, TARIFFS)
@@ -42,6 +46,9 @@ async def cmd_editbuy(message: Message):
     """/editbuy <стоимость> — change tariff price in Stars. Admin-only."""
     if not _is_admin(message.from_user.id):
         return await message.answer("❌ У вас нет прав для этой команды.")
+
+    if not await require_admin_login(message):
+        return
 
     parts = (message.text or "").split(maxsplit=1)
     if len(parts) < 2:
@@ -69,6 +76,9 @@ async def test_buy(message: Message):
 
     if not _is_admin(message.from_user.id):
         return await message.answer("❌ У вас нет прав для этой команды.")
+
+    if not await require_admin_login(message):
+        return
 
     real_id = message.from_user.id
     user = await get_or_create_user(real_id)

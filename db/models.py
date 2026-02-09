@@ -48,3 +48,12 @@ class SupportTicket(Base):
 
     # Do not store the last support message in DB.
     user: Mapped["User"] = relationship(back_populates="support_tickets")
+
+class AdminAuth(Base):
+    __tablename__ = "admin_auth"
+
+    tg_id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=False)
+    password_hash: Mapped[str] = mapped_column(String(512))
+    created_at: Mapped[datetime] = mapped_column(default=datetime.utcnow)
+    last_login_at: Mapped[Optional[datetime]] = mapped_column(DateTime, nullable=True, default=None)
+

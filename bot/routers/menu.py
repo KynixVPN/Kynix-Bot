@@ -26,6 +26,7 @@ from services.payments_refund import refund_stars
 from services.xui_client import delete_xui_client
 
 from config import ADMINS, settings
+from security.admin_guard import require_admin_login
 
 from db.base import async_session
 from db.models import SupportTicket
@@ -318,6 +319,9 @@ async def cmd_inf(message: Message):
     if message.from_user.id not in ADMINS:
         return await message.answer("❌ У вас нет прав.")
 
+    if not await require_admin_login(message):
+        return
+
     parts = message.text.split()
     if len(parts) != 2:
         return await message.answer("Использование: /inf FAKE_ID")
@@ -368,6 +372,9 @@ async def cmd_del(message: Message):
     if message.from_user.id not in ADMINS:
         return await message.answer("❌ У вас нет прав.")
 
+    if not await require_admin_login(message):
+        return
+
     parts = (message.text or "").split()
     if len(parts) != 2:
         return await message.answer("Использование: /del FAKE_ID")
@@ -398,6 +405,9 @@ async def cmd_month(message: Message):
     if message.from_user.id not in ADMINS:
         return await message.answer("❌ У вас нет прав.")
 
+    if not await require_admin_login(message):
+        return
+
     parts = (message.text or "").split()
     if len(parts) != 2:
         return await message.answer("Использование: /month FAKE_ID")
@@ -427,6 +437,9 @@ async def cmd_year(message: Message):
     if message.from_user.id not in ADMINS:
         return await message.answer("❌ У вас нет прав.")
 
+    if not await require_admin_login(message):
+        return
+
     parts = (message.text or "").split()
     if len(parts) != 2:
         return await message.answer("Использование: /year FAKE_ID")
@@ -455,6 +468,9 @@ async def cmd_year(message: Message):
 async def cmd_subs_until(message: Message):
     if message.from_user.id not in ADMINS:
         return await message.answer("❌ У вас нет прав.")
+
+    if not await require_admin_login(message):
+        return
 
     parts = (message.text or "").split()
     if len(parts) != 3:
@@ -551,6 +567,9 @@ async def cmd_refresh(message: Message):
 async def cmd_refund(message: Message):
     if message.from_user.id not in ADMINS:
         return await message.answer("❌ У вас нет прав.")
+
+    if not await require_admin_login(message):
+        return
 
     parts = message.text.split()
     if len(parts) != 4:
