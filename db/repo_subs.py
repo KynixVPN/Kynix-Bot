@@ -15,6 +15,48 @@ from services.xui_client import (
 )
 
 
+async def purge_expired_subscriptions() -> int:
+    """Delete expired Plus subscriptions from X-UI and from DB.
+
+    A subscription is considered expired if:
+      - expires_at is set (Plus)
+      - expires_at < datetime.utcnow()
+
+    Returns number of deleted DB rows.
+    """
+    now = datetime.utcnow()
+
+    async with async_session() as session:
+        q = select(Subscription).where(
+            Subscription.expires_at.is_not(None),
+            Subscription.expires_at < now,
+        )
+        res = await session.execute(q)
+        expired = res.scalars().all()
+
+        deleted = 0
+        for sub in expired:
+            # 1) Remove from X-UI (best effort)
+            if sub.xui_email:
+                try:
+                    await delete_xui_client(
+                        email=str(sub.xui_email),
+                        inbound_id=int(settings.XUI_INBOUND_ID),
+                    )
+                except Exception:
+                    # If X-UI already doesn't have the client (manual deletion etc.),
+                    # we still must remove the expired subscription from DB.
+                    pass
+
+            # 2) Remove from DB
+            await session.delete(sub)
+            deleted += 1
+
+        if deleted:
+            await session.commit()
+        return deleted
+
+
 async def get_user_last_subscription(user_id: int):
     async with async_session() as session:
         q = (

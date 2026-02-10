@@ -12,7 +12,7 @@ from db.repo_admin_auth import (
     verify_admin_password,
     mark_admin_logged_in_db,
 )
-from security.admin_session import is_admin_logged_in, mark_admin_logged_in
+from security.admin_session import is_admin_logged_in, mark_admin_logged_in, mark_admin_logged_out
 
 router = Router(name="admin_login")
 
@@ -45,17 +45,28 @@ async def cmd_login(message: Message) -> None:
     auth = await get_admin_auth(uid)
 
     if auth is None:
-        password = secrets.token_urlsafe(12)
+        # First login:
+        # - if admin supplied a password: persist it (argon2id hash)
+        # - otherwise: generate a strong random one
+        password = supplied_password or secrets.token_urlsafe(12)
         await create_admin_auth(uid, password)
         mark_admin_logged_in(uid)
-        await message.answer(
-            (
-                "🔐 <b>Создан пароль администратора</b> (первый вход).\n\n"
-                f"Пароль: <code>{password}</code>\n\n"
-                "Сохраните его в надёжном месте. Повторно показать пароль нельзя.\n"
-                "Для следующих входов: <code>/login пароль</code>"
+        await mark_admin_logged_in_db(uid)
+
+        if supplied_password:
+            await message.answer(
+                "✅ Пароль администратора сохранён. Вы авторизованы.\n"
+                "Для следующих входов используйте: <code>/login пароль</code>"
             )
-        )
+        else:
+            await message.answer(
+                (
+                    "🔐 <b>Создан пароль администратора</b> (первый вход).\n\n"
+                    f"Пароль: <code>{password}</code>\n\n"
+                    "Сохраните его в надёжном месте. Повторно показать пароль нельзя.\n"
+                    "Для следующих входов: <code>/login пароль</code>"
+                )
+            )
         return
 
     if not supplied_password:
@@ -70,3 +81,24 @@ async def cmd_login(message: Message) -> None:
     mark_admin_logged_in(uid)
     await mark_admin_logged_in_db(uid)
     await message.answer("✅ Авторизация успешна.")
+
+
+@router.message(Command("logout"))
+async def cmd_logout(message: Message) -> None:
+    """Admin logout.
+
+    /logout
+    Clears in-memory admin session.
+    """
+    uid = message.from_user.id if message.from_user else 0
+
+    if not _is_admin(uid):
+        await message.answer("❌ У вас нет прав для этой команды.")
+        return
+
+    if not is_admin_logged_in(uid):
+        await message.answer("ℹ️ Вы не авторизованы.")
+        return
+
+    mark_admin_logged_out(uid)
+    await message.answer("✅ Вы вышли из админки.")

@@ -15,5 +15,10 @@ def mark_admin_logged_in(tg_id: int) -> None:
     _admin_logged_in[tg_id] = time.time()
 
 
+def mark_admin_logged_out(tg_id: int) -> None:
+    """Remove admin from in-memory session store."""
+    _admin_logged_in.pop(tg_id, None)
+
+
 def clear_admin_sessions() -> None:
     _admin_logged_in.clear()

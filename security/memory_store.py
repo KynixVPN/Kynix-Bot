@@ -4,6 +4,7 @@ from typing import Dict, Tuple
 
 from config import settings
 from security.admin_session import clear_admin_sessions
+from db.repo_subs import purge_expired_subscriptions
 
 real_ids: Dict[int, int] = {}
 
@@ -53,5 +54,17 @@ async def clean_memory():
         clear_admin_sessions()
 
 
+async def clean_expired_subscriptions():
+    """Background loop: purge expired subscriptions (X-UI + DB)."""
+    while True:
+        await asyncio.sleep(settings.SUBSCRIPTION_CLEAN_INTERVAL_SECONDS)
+        try:
+            await purge_expired_subscriptions()
+        except Exception:
+            # Do not crash bot if X-UI/DB is temporarily unavailable
+            pass
+
+
 def start_schedulers():
     asyncio.create_task(clean_memory())
+    asyncio.create_task(clean_expired_subscriptions())

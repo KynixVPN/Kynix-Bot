@@ -38,6 +38,8 @@ class Settings(BaseSettings):
     CODE_HASH: str       
     HASH_SALT: str
     MEMORY_CLEAN_INTERVAL_HOURS: int = 6
+    # How often to scan DB and purge expired Plus subscriptions (delete from X-UI + delete from DB)
+    SUBSCRIPTION_CLEAN_INTERVAL_SECONDS: int = 300
     PROVIDER_TOKEN: str | None = None
 
     @field_validator("CODE_HASH", mode="before")
