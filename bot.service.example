@@ -1,0 +1,22 @@
+[Unit]
+Description=Kynix VPN Telegram Bot
+After=network.target
+
+[Service]
+ExecStart=/usr/bin/python3.12 /opt/bot/app.py
+WorkingDirectory=/opt/bot
+
+Restart=always
+RestartSec=5
+
+User=bot
+EnvironmentFile=/etc/bot/.env
+
+ProtectSystem=strict
+PrivateTmp=true
+NoNewPrivileges=true
+ReadOnlyPaths=/opt/bot/
+ReadWritePaths=/opt/bot/buy_settings.json
+
+[Install]
+WantedBy=multi-user.target
