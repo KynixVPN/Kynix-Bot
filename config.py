@@ -24,7 +24,10 @@ class Settings(BaseSettings):
     XUI_PASSWORD: str
     XUI_INBOUND_ID: int
     XUI_INBOUND_ID_INF: int
-
+    XUI_INBOUND_ID_PLUS_TCP: int | None = None
+    XUI_INBOUND_ID_PLUS_XHTTP: int | None = None
+    XUI_INBOUND_ID_INF_TCP: int | None = None
+    XUI_INBOUND_ID_INF_XHTTP: int | None = None
 
     XUI_TLS_CA_CERT: str | None = None
     XUI_TLS_CLIENT_CERT: str | None = None

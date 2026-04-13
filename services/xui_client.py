@@ -1,22 +1,68 @@
-import logging
-import httpx
-import uuid
-import time
-import json
 import asyncio
-import ssl
 import hashlib
+import json
+import logging
+import ssl
+import time
+import uuid
 from datetime import datetime, timezone
-from urllib.parse import urlparse
+from urllib.parse import quote, urlencode, urlparse
+
+import httpx
+
 from config import settings
 
 logger = logging.getLogger("xui_client")
+
+TRANSPORT_TCP = "tcp"
+TRANSPORT_XHTTP = "xhttp"
+PLAN_PLUS = "plus"
+PLAN_INF = "inf"
 
 
 class XuiError(Exception):
     pass
 
 
+def get_supported_transports() -> tuple[str, str]:
+    return TRANSPORT_TCP, TRANSPORT_XHTTP
+
+
+def build_xui_email(fake_id: int, transport: str) -> str:
+    transport = str(transport).lower()
+    if transport == TRANSPORT_TCP:
+        return f"t{fake_id}"
+    if transport == TRANSPORT_XHTTP:
+        return f"x{fake_id}"
+    raise XuiError(f"Unsupported transport: {transport}")
+
+
+def get_transport_label(transport: str) -> str:
+    return "TCP" if transport == TRANSPORT_TCP else "xHTTP"
+
+
+def get_inbound_id_for_plan_transport(plan: str, transport: str) -> int:
+    plan = str(plan).lower()
+    transport = str(transport).lower()
+
+    if plan == PLAN_PLUS:
+        if transport == TRANSPORT_TCP:
+            return int(getattr(settings, "XUI_INBOUND_ID_PLUS_TCP", settings.XUI_INBOUND_ID))
+        if transport == TRANSPORT_XHTTP:
+            fallback = getattr(settings, "XUI_INBOUND_ID_PLUS_TCP", settings.XUI_INBOUND_ID)
+            return int(getattr(settings, "XUI_INBOUND_ID_PLUS_XHTTP", fallback))
+    elif plan == PLAN_INF:
+        if transport == TRANSPORT_TCP:
+            return int(getattr(settings, "XUI_INBOUND_ID_INF_TCP", settings.XUI_INBOUND_ID_INF))
+        if transport == TRANSPORT_XHTTP:
+            fallback = getattr(settings, "XUI_INBOUND_ID_INF_TCP", settings.XUI_INBOUND_ID_INF)
+            return int(getattr(settings, "XUI_INBOUND_ID_INF_XHTTP", fallback))
+
+    raise XuiError(f"Unsupported plan/transport combination: {plan}/{transport}")
+
+
+def get_plan_for_expires_at(expires_at) -> str:
+    return PLAN_INF if expires_at is None else PLAN_PLUS
 
 
 def _get_httpx_tls_kwargs() -> dict:
@@ -81,6 +127,7 @@ async def _check_xui_cert_fingerprint() -> None:
             pass
 
 
+
 def _build_xui_http_client() -> httpx.AsyncClient:
     tls_kwargs = _get_httpx_tls_kwargs()
     return httpx.AsyncClient(
@@ -89,6 +136,8 @@ def _build_xui_http_client() -> httpx.AsyncClient:
         follow_redirects=True,
         **tls_kwargs,
     )
+
+
 async def xui_login(client: httpx.AsyncClient):
     resp = await client.post(
         "/login",
@@ -97,6 +146,7 @@ async def xui_login(client: httpx.AsyncClient):
     )
     if resp.status_code != 200:
         raise XuiError(f"Failed to login: {resp.text}")
+
 
 async def get_inbound(client: httpx.AsyncClient, inbound_id: int):
     resp = await client.get("/panel/api/inbounds/list")
@@ -110,62 +160,185 @@ async def get_inbound(client: httpx.AsyncClient, inbound_id: int):
 
     raise XuiError(f"Inbound {inbound_id} not found")
 
+
+
 def get_base_host():
-    """
-    Берёт хост из XUI_BASE_URL:
-    http://1.1.1.1:1111→ 1.1.1.1
-    https://vpn.domain.com → vpn.domain.com
-    """
     url = settings.XUI_BASE_URL.replace("http://", "").replace("https://", "")
-    return url.split(":")[0]
+    return url.split(":")[0].split("/")[0]
 
-def build_vless(uid, host, port, tag, fake_id, pbk, sid):
-    return (
-        f"vless://{uid}@{host}:{port}"
-        f"?type=tcp"
-        f"&encryption=none"
-        f"&security=reality"
-        f"&pbk={pbk}"
-        f"&fp=chrome"
-        f"&sni=google.com"
-        f"&sid={sid}"
-        f"&spx=%2F"
-        f"&flow=xtls-rprx-vision"
-        f"#Kynix-VPN-{tag}-{fake_id}"
+
+def _as_list(value) -> list:
+    if isinstance(value, list):
+        return value
+    if value in (None, ""):
+        return []
+    return [value]
+
+
+def _first_non_empty(*values):
+    for value in values:
+        if isinstance(value, list):
+            for item in value:
+                if item not in (None, ""):
+                    return item
+        elif value not in (None, ""):
+            return value
+    return None
+
+
+def _extract_sni(stream_obj: dict) -> str | None:
+    reality = stream_obj.get("realitySettings") or {}
+    reality_settings = reality.get("settings") or {}
+    sni = _first_non_empty(
+        reality_settings.get("serverNames"),
+        reality.get("serverNames"),
+        reality_settings.get("serverName"),
+        reality.get("serverName"),
     )
+    if sni:
+        return str(sni)
+
+    tls_obj = stream_obj.get("tlsSettings") or {}
+    sni = _first_non_empty(
+        tls_obj.get("serverName"),
+        tls_obj.get("serverNames"),
+    )
+    if sni:
+        return str(sni)
+
+    return None
 
 
-def _infer_inbound_and_tag(expires_at):
-    """Return (inbound_id, tag) matching how we create clients."""
-    if expires_at is None:
-        return int(settings.XUI_INBOUND_ID_INF), "Inf"
-    return int(settings.XUI_INBOUND_ID), "Plus"
+def _extract_reality_public_key(stream_obj: dict) -> str | None:
+    reality = stream_obj.get("realitySettings") or {}
+    reality_settings = reality.get("settings") or {}
+    value = _first_non_empty(
+        reality_settings.get("publicKey"),
+        reality.get("publicKey"),
+    )
+    return str(value) if value else None
 
 
-async def build_vless_for_email(*, email: str, fake_id: int, expires_at, inbound_id: int | None = None, tag: str | None = None) -> str:
-    """Build a VLESS link for an existing X-UI client without storing it in the DB.
+def _extract_reality_short_id(stream_obj: dict) -> str | None:
+    reality = stream_obj.get("realitySettings") or {}
+    reality_settings = reality.get("settings") or {}
+    value = _first_non_empty(
+        reality.get("shortIds"),
+        reality_settings.get("shortIds"),
+        reality.get("shortId"),
+        reality_settings.get("shortId"),
+    )
+    return str(value) if value else None
 
-    We find the client UUID by `email` inside inbound settings, then rebuild the same
-    VLESS URI as `create_xui_client` does.
-    """
-    if inbound_id is None or tag is None:
-        inbound_id2, tag2 = _infer_inbound_and_tag(expires_at)
-        inbound_id = inbound_id or inbound_id2
-        tag = tag or tag2
+
+def _extract_spider_x(stream_obj: dict) -> str:
+    reality = stream_obj.get("realitySettings") or {}
+    reality_settings = reality.get("settings") or {}
+    value = _first_non_empty(
+        reality_settings.get("spiderX"),
+        reality.get("spiderX"),
+        "/",
+    )
+    return str(value)
+
+
+def _pick_connect_host(inbound: dict, stream_obj: dict) -> str:
+    host = inbound.get("listen")
+    if host and host not in {"0.0.0.0", "::", "127.0.0.1", "localhost"}:
+        return str(host)
+
+    return get_base_host()
+
+
+
+def _build_vless_from_parts(uid: str, host: str, port: int, params: dict, tag: str) -> str:
+    return f"vless://{uid}@{host}:{port}?{urlencode(params)}#{quote(tag)}"
+
+
+
+def build_vless(uid, inbound: dict, fake_id: int, tag: str, transport: str | None = None, email: str | None = None):
+    stream_obj = json.loads(inbound["streamSettings"])
+    network = str(transport or stream_obj.get("network") or TRANSPORT_TCP).lower()
+    security = str(inbound.get("security") or stream_obj.get("security") or "none").lower()
+    host = _pick_connect_host(inbound, stream_obj)
+    port = int(inbound["port"])
+
+    params: dict[str, str] = {
+        "type": network,
+        "encryption": "none",
+    }
+
+    if security and security != "none":
+        params["security"] = security
+
+    if security == "reality":
+        reality = stream_obj.get("realitySettings") or {}
+        reality_settings = reality.get("settings") or {}
+        public_key = _extract_reality_public_key(stream_obj)
+        if public_key:
+            params["pbk"] = public_key
+        params["fp"] = str(_first_non_empty(reality_settings.get("fingerprint"), reality.get("fingerprint"), "chrome"))
+        sni = _extract_sni(stream_obj)
+        if sni:
+            params["sni"] = sni
+        short_id = _extract_reality_short_id(stream_obj)
+        if short_id:
+            params["sid"] = short_id
+        params["spx"] = _extract_spider_x(stream_obj)
+
+    if security == "tls":
+        tls_settings = stream_obj.get("tlsSettings") or {}
+        sni = _extract_sni(stream_obj)
+        if sni:
+            params["sni"] = sni
+        alpn = tls_settings.get("alpn")
+        if isinstance(alpn, list) and alpn:
+            params["alpn"] = ",".join(str(x) for x in alpn)
+
+    xhttp_settings = stream_obj.get("xhttpSettings") or {}
+    if network == TRANSPORT_XHTTP:
+        path = xhttp_settings.get("path") or "/"
+        params["path"] = str(path)
+        host_header = xhttp_settings.get("host")
+        if isinstance(host_header, list):
+            host_header = host_header[0] if host_header else None
+        if host_header:
+            params["host"] = str(host_header)
+        mode = xhttp_settings.get("mode")
+        if mode:
+            params["mode"] = str(mode)
+
+    flow = None
+    try:
+        settings_obj = json.loads(inbound["settings"])
+        clients = settings_obj.get("clients", [])
+        client_obj = None
+        if email is not None:
+            client_obj = next((c for c in clients if str(c.get("email")) == str(email)), None)
+        if client_obj is not None:
+            flow = client_obj.get("flow")
+    except Exception:
+        flow = None
+
+    if not flow and network == TRANSPORT_TCP and security == "reality":
+        flow = "xtls-rprx-vision"
+    if flow:
+        params["flow"] = str(flow)
+
+    title = f"Kynix-VPN-{tag}-{get_transport_label(network)}-{fake_id}"
+    return _build_vless_from_parts(uid=str(uid), host=host, port=port, params=params, tag=title)
+
+
+async def build_vless_for_email(*, email: str, fake_id: int, expires_at, transport: str) -> str:
+    plan = get_plan_for_expires_at(expires_at)
+    inbound_id = get_inbound_id_for_plan_transport(plan, transport)
+    tag = "Inf" if plan == PLAN_INF else "Plus"
 
     await _check_xui_cert_fingerprint()
 
     async with _build_xui_http_client() as client:
         await xui_login(client)
         inbound = await get_inbound(client, int(inbound_id))
-
-        stream_obj = json.loads(inbound["streamSettings"])
-        reality = stream_obj["realitySettings"]
-        pbk = reality["settings"]["publicKey"]
-        sid = reality["shortIds"][0]
-
-        host = get_base_host()
-        port = inbound["port"]
 
         settings_obj = json.loads(inbound["settings"])
         clients = settings_obj.get("clients", [])
@@ -178,29 +351,24 @@ async def build_vless_for_email(*, email: str, fake_id: int, expires_at, inbound
         if not uid:
             raise XuiError(f"Client {email} has no uuid/id in inbound {inbound_id}")
 
-        return build_vless(uid, host, port, tag, fake_id, pbk, sid)
-async def create_xui_client(fake_id: int, expiry_ts: int, tag: str, inbound_id: int):
+        return build_vless(uid, inbound, fake_id, tag, transport=transport, email=email)
+
+
+async def create_xui_client(fake_id: int, expiry_ts: int, tag: str, plan: str, transport: str):
     await _check_xui_cert_fingerprint()
+    transport = str(transport).lower()
+    inbound_id = get_inbound_id_for_plan_transport(plan, transport)
 
     async with _build_xui_http_client() as client:
-
         await xui_login(client)
-
         inbound = await get_inbound(client, inbound_id)
-
-        stream_obj = json.loads(inbound["streamSettings"])
-        reality = stream_obj["realitySettings"]
-
-        pbk = reality["settings"]["publicKey"]
-        sid = reality["shortIds"][0]
-
-        host = get_base_host()  
-
-        port = inbound["port"]
 
         uid = str(uuid.uuid4())
         subid = uuid.uuid4().hex[:16]
-        email = f"{fake_id}"
+        email = build_xui_email(fake_id, transport)
+
+        network = str((json.loads(inbound["streamSettings"])).get("network") or transport).lower()
+        flow = "xtls-rprx-vision" if network == TRANSPORT_TCP else ""
 
         client_js = {
             "id": uid,
@@ -211,7 +379,8 @@ async def create_xui_client(fake_id: int, expiry_ts: int, tag: str, inbound_id: 
             "totalGB": 0,
             "tgId": 0,
             "reset": 0,
-            "flow": "xtls-rprx-vision",
+            "subId": subid,
+            "flow": flow,
         }
 
         resp = await client.post(
@@ -229,52 +398,65 @@ async def create_xui_client(fake_id: int, expiry_ts: int, tag: str, inbound_id: 
             j = resp.json()
             if isinstance(j, dict) and not j.get("success", True):
                 raise XuiError(f"addClient rejected: {resp.text}")
-        except:
+        except Exception:
             pass
 
-        vless = build_vless(uid, host, port, tag, fake_id, pbk, sid)
+        vless = build_vless(uid, inbound, fake_id, tag, transport=transport, email=email)
 
         return {
             "uuid": uid,
             "subId": subid,
             "email": email,
             "vless": vless,
+            "transport": transport,
+            "inbound_id": inbound_id,
         }
 
 
-async def create_client_for_user(fake_id: int, days: int):
+async def create_client_for_user(fake_id: int, days: int, transport: str):
     expiry_ts = int(time.time() * 1000 + days * 86400 * 1000)
-    inbound_plus = int(settings.XUI_INBOUND_ID)
-
     return await create_xui_client(
         fake_id=fake_id,
         expiry_ts=expiry_ts,
         tag="Plus",
-        inbound_id=inbound_plus,
+        plan=PLAN_PLUS,
+        transport=transport,
     )
 
-async def create_client_for_user_until(fake_id: int, expires_at: datetime):
+
+async def create_client_for_user_until(fake_id: int, expires_at: datetime, transport: str):
     if expires_at.tzinfo is None:
         expires_at = expires_at.replace(tzinfo=timezone.utc)
     expiry_ts = int(expires_at.timestamp() * 1000)
 
-    inbound_plus = int(settings.XUI_INBOUND_ID)
     return await create_xui_client(
         fake_id=fake_id,
         expiry_ts=expiry_ts,
         tag="Plus",
-        inbound_id=inbound_plus,
+        plan=PLAN_PLUS,
+        transport=transport,
     )
 
-async def create_client_inf(fake_id: int):
-    inbound_inf = int(settings.XUI_INBOUND_ID_INF)
 
+async def create_client_inf(fake_id: int, transport: str):
     return await create_xui_client(
         fake_id=fake_id,
         expiry_ts=0,
         tag="Inf",
-        inbound_id=inbound_inf,
+        plan=PLAN_INF,
+        transport=transport,
     )
+
+
+async def ensure_clients_for_subscription(fake_id: int, expires_at) -> dict[str, dict]:
+    created: dict[str, dict] = {}
+    for transport in get_supported_transports():
+        if expires_at is None:
+            created[transport] = await create_client_inf(fake_id, transport=transport)
+        else:
+            created[transport] = await create_client_for_user_until(fake_id, expires_at=expires_at, transport=transport)
+    return created
+
 
 async def delete_xui_client(email: str, inbound_id: int | None = None):
     inbound_id = inbound_id or int(settings.XUI_INBOUND_ID)
@@ -309,7 +491,7 @@ async def delete_xui_client(email: str, inbound_id: int | None = None):
             j = resp.json()
             if isinstance(j, dict) and not j.get("success", True):
                 raise XuiError(f"deleteClient rejected: {resp.text}")
-        except:
+        except Exception:
             pass
 
         logger.info(
@@ -318,6 +500,7 @@ async def delete_xui_client(email: str, inbound_id: int | None = None):
             client_uuid,
             inbound_id,
         )
+
 
 async def update_xui_client_expiry(email: str, inbound_id: int, expiry_ts: int) -> dict:
     await _check_xui_cert_fingerprint()

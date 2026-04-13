@@ -3,12 +3,11 @@ from typing import List
 from datetime import datetime, timedelta
 
 from aiogram import Bot
-from aiogram.types import LabeledPrice, PreCheckoutQuery, Message
+from aiogram.types import LabeledPrice, Message
 
-from config import settings
-from db.base import async_session
-from db.models import Subscription, User
-from services.xui_client import create_client_for_user, XuiError
+from db.repo_subs import upsert_plus_subscription_until
+from db.models import User
+from services.xui_client import XuiError
 from services.buy_control import apply_buy_settings
 
 
@@ -29,7 +28,6 @@ TARIFFS: List[Tariff] = [
     ),
 ]
 
-# Apply runtime settings (price + open/closed) from JSON.
 apply_buy_settings(TARIFFS)
 
 
@@ -39,12 +37,8 @@ def build_prices(tariff: Tariff) -> List[LabeledPrice]:
 
 async def handle_successful_payment(bot: Bot, message: Message, user: User, tariff: Tariff):
     try:
-        xui_data = await create_client_for_user(user.fake_id, days=tariff.days)
-
-        config_text = xui_data["vless"]
-        client_id = xui_data.get("clientId")
-        email = xui_data.get("email")
-
+        expires_at = None if not getattr(tariff, "days", None) else datetime.utcnow() + timedelta(days=tariff.days)
+        await upsert_plus_subscription_until(user.id, fake_id=user.fake_id, expires_at=expires_at)
     except XuiError as e:
         from config import settings as _s
 
@@ -60,36 +54,23 @@ async def handle_successful_payment(bot: Bot, message: Message, user: User, tari
                 pass
 
         await message.answer(
-            "Произошла ошибка при выдаче VPN-конфига. "
+            "Произошла ошибка при активации VPN-ключей. "
             "Мы уже занимаемся этим, попробуйте позже."
         )
         return
 
-    expires_at = None if not getattr(tariff, 'days', None) else datetime.utcnow() + timedelta(days=tariff.days)
-
-
-    async with async_session() as session:
-        sub = Subscription(
-            user_id=user.id,
-            active=True,
-            expires_at=expires_at,
-            xui_email=email,
-        )
-        session.add(sub)
-        await session.commit()
-
-    await message.answer(
-        "✅ Подписка активирована!\n"
-        "Вот ваш VPN-конфиг:\n\n"
-        f"<code>{config_text}</code>"
-        "\n\n"
-        f"- <a href=\"{settings.INSTRUCTION_URL}\">Инструкция по подключению Kynix VPN и приложения</a>"
-    )
-
     from config import settings as _s
 
+    await message.answer(
+        "✅ Подписка активирована!\n\n"
+        "Спасибо за оплату. Перейдите в <b>Профиль → Мои ключи</b> и выберите нужный ключ.\n\n"
+        "• <b>VLESS TCP</b> — наиболее совместимый\n"
+        "• <b>VLESS xHTTP</b> — более устойчивый к блокировкам\n\n"
+        f"- <a href=\"{_s.INSTRUCTION_URL}\">Инструкция по подключению Kynix VPN и приложения</a>"
+    )
+
     text_admin = (
-        "💸 Успешная (в том числе тестовая) выдача конфига\n"
+        "💸 Успешная (в том числе тестовая) активация подписки\n"
         f"FAKE ID: {user.fake_id}\n"
         f"Тариф: {tariff.title}\n"
     )

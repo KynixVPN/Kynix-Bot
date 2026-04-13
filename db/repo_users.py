@@ -6,7 +6,14 @@ from .base import async_session
 from .models import User, Subscription, SupportTicket
 from security.hash_utils import hash_tg_id
 from security.id_utils import generate_fake_id
-from services.xui_client import delete_xui_client
+from services.xui_client import (
+    PLAN_INF,
+    PLAN_PLUS,
+    build_xui_email,
+    delete_xui_client,
+    get_inbound_id_for_plan_transport,
+    get_supported_transports,
+)
 from config import settings
 
 
@@ -57,11 +64,15 @@ async def delete_user_data_by_fakeid(fake_id: int) -> bool:
         if user is None:
             return False
 
-        for inbound_id in (int(settings.XUI_INBOUND_ID), int(settings.XUI_INBOUND_ID_INF)):
-            try:
-                await delete_xui_client(email=str(fake_id), inbound_id=inbound_id)
-            except Exception:
-                pass
+        for plan in (PLAN_PLUS, PLAN_INF):
+            for transport in get_supported_transports():
+                try:
+                    await delete_xui_client(
+                        email=build_xui_email(fake_id, transport),
+                        inbound_id=get_inbound_id_for_plan_transport(plan, transport),
+                    )
+                except Exception:
+                    pass
 
         await session.execute(delete(Subscription).where(Subscription.user_id == user.id))
         await session.execute(delete(SupportTicket).where(SupportTicket.user_id == user.id))

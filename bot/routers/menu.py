@@ -11,19 +11,28 @@ from aiogram.types import (
 
 from db.repo_users import get_or_create_user, get_user_by_fakeid, delete_user_data_by_fakeid
 from db.repo_subs import (
-    get_user_last_subscription,
-    get_user_active_subscription,
-    refresh_subscription_config,
-    create_subscription_inf,
     create_subscription,
+    create_subscription_inf,
     deactivate_user_subscriptions,
+    get_subscription_key,
+    get_user_active_subscription,
+    get_user_last_subscription,
+    refresh_subscription_config,
     upsert_plus_subscription_until,
 )
 
 from services.payments import TARIFFS, build_prices, handle_successful_payment
 from services.buy_control import apply_buy_settings, is_buy_enabled
 from services.payments_refund import refund_stars
-from services.xui_client import delete_xui_client
+from services.xui_client import (
+    PLAN_INF,
+    PLAN_PLUS,
+    TRANSPORT_TCP,
+    TRANSPORT_XHTTP,
+    build_xui_email,
+    delete_xui_client,
+    get_inbound_id_for_plan_transport,
+)
 
 from config import ADMINS, settings
 from security.admin_guard import require_admin_login
@@ -66,10 +75,20 @@ def plus_menu_kb():
 
 def profile_menu_kb():
     return InlineKeyboardMarkup(inline_keyboard=[
+        [InlineKeyboardButton(text="Мои ключи", callback_data="profile_keys")],
         [InlineKeyboardButton(text="Удалить", callback_data="profile_delete_start")],
         [InlineKeyboardButton(text="Главное меню", callback_data="menu_home")],
     ])
 
+
+
+
+def profile_keys_kb():
+    return InlineKeyboardMarkup(inline_keyboard=[
+        [InlineKeyboardButton(text="VLESS TCP", callback_data="profile_key_tcp")],
+        [InlineKeyboardButton(text="VLESS xHTTP", callback_data="profile_key_xhttp")],
+        [InlineKeyboardButton(text="Назад", callback_data="menu_profile")],
+    ])
 
 def profile_delete_confirm_1_kb():
     return InlineKeyboardMarkup(inline_keyboard=[
@@ -261,7 +280,65 @@ async def menu_profile(call: CallbackQuery):
     await safe_delete_message(call.message)
 
 
-    
+@router.callback_query(F.data == "profile_keys")
+async def profile_keys(call: CallbackQuery):
+    await call.answer()
+
+    user = await get_or_create_user(call.from_user.id)
+    sub = await get_user_active_subscription(user.id)
+    if not sub:
+        return await call.message.answer(
+            "❌ У вас нет активной подписки.\n\n"
+            "Откройте меню и оформите тариф <b>Plus</b>."
+        )
+
+    text = (
+        "<b>Мои ключи</b>\n\n"
+        "Выберите нужный транспорт:\n\n"
+        "• <b>VLESS TCP</b> — наиболее совместимый\n"
+        "• <b>VLESS xHTTP</b> — более устойчивый к блокировкам"
+    )
+
+    await call.message.answer(text, reply_markup=profile_keys_kb())
+    await safe_delete_message(call.message)
+
+
+async def _send_transport_key(call: CallbackQuery, transport: str):
+    user = await get_or_create_user(call.from_user.id)
+    sub = await get_user_active_subscription(user.id)
+    if not sub:
+        return await call.message.answer(
+            "❌ У вас нет активной подписки.\n\n"
+            "Откройте меню и оформите тариф <b>Plus</b>."
+        )
+
+    try:
+        cfg = await get_subscription_key(sub=sub, fake_id=user.fake_id, transport=transport)
+    except Exception as e:
+        return await call.message.answer(
+            "❌ Не удалось получить ключ с сервера:\n"
+            f"<code>{e}</code>"
+        )
+
+    label = "VLESS TCP" if transport == TRANSPORT_TCP else "VLESS xHTTP"
+    await call.message.answer(
+        f"<b>{label}</b>\n\n"
+        f"<code>{cfg}</code>"
+    )
+
+
+@router.callback_query(F.data == "profile_key_tcp")
+async def profile_key_tcp(call: CallbackQuery):
+    await call.answer()
+    await _send_transport_key(call, TRANSPORT_TCP)
+
+
+@router.callback_query(F.data == "profile_key_xhttp")
+async def profile_key_xhttp(call: CallbackQuery):
+    await call.answer()
+    await _send_transport_key(call, TRANSPORT_XHTTP)
+
+
 @router.callback_query(F.data == "profile_delete_start")
 async def profile_delete_start(call: CallbackQuery):
     await call.answer()
@@ -331,12 +408,11 @@ async def cmd_inf(message: Message):
 
     if not user:
         return await message.answer("❌ Пользователь не найден.")
-
-    sub, cfg = await create_subscription_inf(user.id, fake_id)
+    await create_subscription_inf(user.id, fake_id)
 
     return await message.answer(
         "🎁 Выдана <b>бессрочная подписка</b>!\n\n"
-        f"<code>{cfg}</code>"
+        "Ключи доступны в профиле: <b>Профиль → Мои ключи</b>."
     )
 
 
@@ -350,21 +426,24 @@ async def _try_delete_xui_for_fake_id(fake_id: int) -> tuple[bool, str | None]:
         sub = None
 
     if sub and sub.active:
-        inbound_candidates = [
-            int(settings.XUI_INBOUND_ID_INF) if sub.expires_at is None else int(settings.XUI_INBOUND_ID)
-        ]
+        plan_candidates = [PLAN_INF if sub.expires_at is None else PLAN_PLUS]
     else:
-        inbound_candidates = [int(settings.XUI_INBOUND_ID), int(settings.XUI_INBOUND_ID_INF)]
+        plan_candidates = [PLAN_PLUS, PLAN_INF]
 
+    deleted_any = False
     last_err: str | None = None
-    for inbound_id in inbound_candidates:
-        try:
-            await delete_xui_client(email=str(fake_id), inbound_id=inbound_id)
-            return True, None
-        except Exception as e:
-            last_err = str(e)
+    for plan in plan_candidates:
+        for transport in (TRANSPORT_TCP, TRANSPORT_XHTTP):
+            try:
+                await delete_xui_client(
+                    email=build_xui_email(fake_id, transport),
+                    inbound_id=get_inbound_id_for_plan_transport(plan, transport),
+                )
+                deleted_any = True
+            except Exception as e:
+                last_err = str(e)
 
-    return False, last_err
+    return deleted_any, last_err
 
 
 @router.message(F.text.startswith("/del"))
@@ -423,12 +502,11 @@ async def cmd_month(message: Message):
 
     await _try_delete_xui_for_fake_id(fake_id)
     await deactivate_user_subscriptions(user.id)
-
-    sub, cfg = await create_subscription(user.id, days=30)
+    await create_subscription(user.id, days=30)
 
     return await message.answer(
         "📅 Выдана подписка на <b>1 месяц</b>!\n\n"
-        f"<code>{cfg}</code>"
+        "Ключи доступны в профиле: <b>Профиль → Мои ключи</b>."
     )
 
 
@@ -455,12 +533,11 @@ async def cmd_year(message: Message):
 
     await _try_delete_xui_for_fake_id(fake_id)
     await deactivate_user_subscriptions(user.id)
-
-    sub, cfg = await create_subscription(user.id, days=365)
+    await create_subscription(user.id, days=365)
 
     return await message.answer(
         "📅 Выдана подписка на <b>1 год</b>!\n\n"
-        f"<code>{cfg}</code>"
+        "Ключи доступны в профиле: <b>Профиль → Мои ключи</b>."
     )
 
 
@@ -507,12 +584,11 @@ async def cmd_subs_until(message: Message):
                 "✅ У пользователя уже есть подписка Plus, срок которой не меньше указанного.\n"
                 f"Текущий срок: <b>{active_sub.expires_at.strftime('%Y-%m-%d %H:%M')}</b>"
             )
-
-    sub, cfg = await upsert_plus_subscription_until(user.id, fake_id=fake_id, expires_at=expires_at)
+    sub = await upsert_plus_subscription_until(user.id, fake_id=fake_id, expires_at=expires_at)
 
     return await message.answer(
         "📅 Подписка Plus выдана/продлена до <b>{}</b>!\n\n"
-        "<code>{}</code>".format(sub.expires_at.strftime("%Y-%m-%d %H:%M"), cfg)
+        "Ключи доступны в профиле: <b>Профиль → Мои ключи</b>.".format(sub.expires_at.strftime("%Y-%m-%d %H:%M"))
     )
 
 
@@ -540,28 +616,21 @@ async def cmd_refresh(message: Message):
             "❌ У вас нет активной подписки.\n\n"
             "Откройте меню и оформите тариф <b>Plus</b>."
         )
-
-    inbound_id = int(settings.XUI_INBOUND_ID_INF) if sub.expires_at is None else int(settings.XUI_INBOUND_ID)
-
     try:
-        await delete_xui_client(email=str(fake_id), inbound_id=inbound_id)
-    except Exception:
-        pass
-
-    try:
-        cfg = await refresh_subscription_config(sub=sub, fake_id=fake_id)
+        await refresh_subscription_config(sub=sub, fake_id=fake_id)
     except Exception as e:
         return await message.answer(
-            "Ошибка при создании нового конфига:\n"
+            "Ошибка при обновлении ключей:\n"
             f"<code>{e}</code>"
         )
 
     refresh_mark_run(real_id)
 
     return await message.answer(
-        "Конфиг обновлён!\n\n"
-        f"<code>{cfg}</code>"
+        "Ключи обновлены!\n\n"
+        "Перейдите в <b>Профиль → Мои ключи</b> и выберите нужный транспорт."
     )
+
 
 @router.message(F.text.startswith("/refund"))
 async def cmd_refund(message: Message):
@@ -593,18 +662,11 @@ async def cmd_refund(message: Message):
     sub = await get_user_last_subscription(user.id)
     if not sub or not sub.active:
         return await message.answer("❌ У пользователя нет активной подписки.")
-
-    if getattr(sub, "expires_at", None) is None:
-        inbound_id = int(settings.XUI_INBOUND_ID_INF)
-    else:
-        inbound_id = int(settings.XUI_INBOUND_ID)
-
-    try:
-        await delete_xui_client(email=str(fake_id), inbound_id=inbound_id)
-    except Exception as e:
+    deleted, err = await _try_delete_xui_for_fake_id(fake_id)
+    if not deleted and err:
         return await message.answer(
-            "❌ Ошибка при удалении конфига в X-UI:\n"
-            f"<code>{e}</code>"
+            "❌ Ошибка при удалении конфигов в X-UI:\n"
+            f"<code>{err}</code>"
         )
 
     await deactivate_user_subscriptions(user.id)
